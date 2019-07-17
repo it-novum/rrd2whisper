@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"encoding/xml"
 	"fmt"
 	"io/ioutil"
@@ -50,10 +51,10 @@ func walkSourceTree(path string, cb rrdSourceFunc) (int, error) {
 			xmlNagios, err := parseRrdXML(path)
 			if err != nil {
 				brokenXMLCount++
-				// TODO: Logging instead of breaking
-				//return fmt.Errorf("Could not read xml file: %s", err)
+				log.Printf("Could not read xml file: %s", err)
+			} else {
+				cb(xmlNagios, path)
 			}
-			cb(xmlNagios, path)
 		}
 		return nil
 	})

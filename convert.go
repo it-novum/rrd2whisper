@@ -16,6 +16,46 @@ type convertSource struct {
 	Whisper             *whisper.Whisper
 }
 
+
+type dataCache struct {
+	values []*whisper.TimeSeriesPoint
+	sources int
+	positions []int
+	size int
+}
+
+func newDataCache(sources, cacheSize int) *dataCache {
+	dc := new(dataCache)
+	dc.sources = sources
+	dc.size = cacheSize
+	dc.values = make([]*whisper.TimeSeriesPoint, cacheSize * sources)
+	dc.positions = make([]int, sources)
+	for i := 0; i < sources; i++ {
+		dc.positions[i] = i * cacheSize
+	}
+	return dc
+}
+
+func (dc *dataCache) addRow(ts int, values []float64) (full bool) {
+	full = false
+	for i, value := range values {
+		pos := dc.positions[i]
+		dc.values[pos] = &whisper.TimeSeriesPoint{
+			Time: ts,
+			Value: value,
+		}
+		dc.positions[i] = pos + 1
+	}
+	full = dc.positions[0] == dc.size
+	return full
+}
+
+func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
+	startPos := source * dc.size
+	endPos := dc.positions[source]
+	return dc.values[startPos:endPos]
+}
+
 func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) error {
 	dumper, err := rrd.NewDumper(xml.RrdPath, "AVERAGE")
 	if err != nil {
@@ -41,25 +81,33 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 		}
 	}
 	numSources := len(convertSources)
+	cache := newDataCache(numSources, 10000)
 
 	startTime := convertSources[0].Whisper.StartTime()
 	lastTime := startTime
 
-	for row := dumper.Next(); row != nil; row = dumper.Next() {
+	rowChan := make(chan *rrd.RrdDumpRow, 10000)
+
+	go func() {
+		for row := dumper.Next(); row != nil; row = dumper.Next() {
+			rowChan <- row
+		}
+		close(rowChan)
+	}()
+
+	for row := range rowChan {
 		ts := int(row.Time.Unix())
-		if ts < startTime {
-			continue
-		}
-		if len(row.Values) != numSources {
-			return fmt.Errorf("Unknown number of columns in rrd file")
-		}
-		for i, value := range row.Values {
-			err = convertSources[i].Whisper.Update(value, ts)
-			if err != nil {
-				return fmt.Errorf("Could not update whisper file: %s", err)
-			}
-		}
 		lastTime = ts
+		full := cache.addRow(ts, row.Values)
+		if full {
+			for i := 0; i < numSources; i++ {
+				err = convertSources[i].Whisper.UpdateMany(cache.rowForSource(i))
+				if err != nil {
+					return fmt.Errorf("Could not update whisper file: %s", err)
+				}
+			}
+			cache = newDataCache(numSources, 10000)
+		}
 	}
 
 	for _, cs := range convertSources {
@@ -111,6 +159,12 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 			return fmt.Errorf("Could not move wsp file to destination directory: %s", err)
 		}
 	}
+
+	okFl, err := os.OpenFile(xml.OkPath, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("Could not create %s file: %s", xml.OkPath, err)
+	}
+	okFl.Close()
 
 	return nil
 }
