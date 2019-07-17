@@ -1,29 +1,28 @@
 package main
 
 import (
-	"sync"
-	"github.com/vbauerster/mpb/v4/decor"
-	"github.com/vbauerster/mpb/v4"
-	"path/filepath"
-	"os"
-	"fmt"
-	"runtime"
 	"flag"
+	"fmt"
+	"github.com/vbauerster/mpb/v4"
+	"github.com/vbauerster/mpb/v4/decor"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 )
 
 type Cli struct {
 	sourceDirectory string
-	repDirectory   string
+	repDirectory    string
 	destDirectory   string
 	includeCorrupt  bool
 	maxAge          int64
-	limit			int
+	limit           int
 	workers         int
 	retention       string
 	checkOnly       bool
 	noMerge         bool
 }
-
 
 func parseCli() (*Cli, error) {
 	var err error
@@ -65,7 +64,6 @@ func parseCli() (*Cli, error) {
 
 	return cli, nil
 }
-
 
 func main() {
 	cli, err := parseCli()
@@ -118,6 +116,6 @@ func main() {
 		close(jobs)
 		wg.Done()
 	}()
-	
+
 	wg.Wait()
 }

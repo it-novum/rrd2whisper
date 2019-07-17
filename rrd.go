@@ -1,12 +1,12 @@
 package main
 
 import (
-	"strings"
+	"encoding/xml"
+	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
-	"fmt"
-	"encoding/xml"
-	"io/ioutil"
+	"strings"
 )
 
 type XmlDatasource struct {
@@ -14,11 +14,11 @@ type XmlDatasource struct {
 }
 
 type XmlNagios struct {
-	XMLName     string          `xml:"NAGIOS"`
-	Hostname    string          `xml:"NAGIOS_HOSTNAME"`
-	Servicename string          `xml:"NAGIOS_SERVICEDESC"`
-	RrdTxt      string          `xml:"RRD>TXT"`
-	TimeT		int64             `xml:"NAGIOS_TIMET"`
+	XMLName     string `xml:"NAGIOS"`
+	Hostname    string `xml:"NAGIOS_HOSTNAME"`
+	Servicename string `xml:"NAGIOS_SERVICEDESC"`
+	RrdTxt      string `xml:"RRD>TXT"`
+	TimeT       int64  `xml:"NAGIOS_TIMET"`
 	RrdPath     string
 	OkPath      string
 	Datasources []XmlDatasource `xml:"DATASOURCE"`
@@ -37,11 +37,11 @@ func parseRrdXML(path string) (*XmlNagios, error) {
 
 	xmlstruct.RrdPath = path[:len(path)-4] + ".rrd"
 	xmlstruct.OkPath = path[:len(path)-4] + ".ok"
-	
+
 	return xmlstruct, nil
 }
 
-type rrdSourceFunc func (xmlNagios *XmlNagios, path string)
+type rrdSourceFunc func(xmlNagios *XmlNagios, path string)
 
 func walkSourceTree(path string, cb rrdSourceFunc) (int, error) {
 	brokenXMLCount := 0

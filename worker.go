@@ -1,13 +1,13 @@
 package main
 
 import (
-	"time"
 	"os"
+	"time"
 )
 
 func checkOkFiles(xmlFiles []*XmlNagios) []*XmlNagios {
 	todoFiles := make([]*XmlNagios, 0, len(xmlFiles))
-	
+
 	for _, fl := range xmlFiles {
 		if _, err := os.Stat(fl.OkPath); os.IsNotExist(err) {
 			todoFiles = append(todoFiles, fl)
@@ -16,11 +16,10 @@ func checkOkFiles(xmlFiles []*XmlNagios) []*XmlNagios {
 
 	return todoFiles
 }
-
 
 func checkAgeFiles(xmlFiles []*XmlNagios, oldest int64) []*XmlNagios {
 	todoFiles := make([]*XmlNagios, 0, len(xmlFiles))
-	
+
 	for _, fl := range xmlFiles {
 		if _, err := os.Stat(fl.OkPath); os.IsNotExist(err) {
 			todoFiles = append(todoFiles, fl)
@@ -30,14 +29,13 @@ func checkAgeFiles(xmlFiles []*XmlNagios, oldest int64) []*XmlNagios {
 	return todoFiles
 }
 
-
 type Workdata struct {
-	foundTotal int
-	foundTodo int
-	tooOld int
-	finalTodo int
+	foundTotal     int
+	foundTodo      int
+	tooOld         int
+	finalTodo      int
 	brokenXMLCount int
-	xmlFiles []*XmlNagios
+	xmlFiles       []*XmlNagios
 }
 
 func gatherWorkdata(cli *Cli) *Workdata {
@@ -55,7 +53,7 @@ func gatherWorkdata(cli *Cli) *Workdata {
 	xmlFiles = checkOkFiles(xmlFiles)
 	workdata.foundTodo = len(xmlFiles)
 
-	oldest := time.Now().Add(time.Duration(-cli.maxAge)*time.Second).Unix()
+	oldest := time.Now().Add(time.Duration(-cli.maxAge) * time.Second).Unix()
 	xmlFiles = checkAgeFiles(xmlFiles, oldest)
 	workdata.tooOld = workdata.foundTodo - len(xmlFiles)
 	workdata.foundTodo = len(xmlFiles)

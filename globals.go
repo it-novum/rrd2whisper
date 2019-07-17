@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-graphite/go-whisper"
 )
+
 var illegalCharactersRegexp *regexp.Regexp
 var whisperRetention whisper.Retentions
 

@@ -1,19 +1,19 @@
 package main
 
 import (
-	"time"
-	"github.com/go-graphite/go-whisper"
-	"os"
-	"io/ioutil"
 	"fmt"
+	"github.com/go-graphite/go-whisper"
 	"github.com/jabdr/rrd"
+	"io/ioutil"
+	"os"
+	"time"
 )
 
 type convertSource struct {
-	WspName string
+	WspName             string
 	DestinationFilename string
-	SourceFilename string
-	Whisper *whisper.Whisper
+	SourceFilename      string
+	Whisper             *whisper.Whisper
 }
 
 func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) error {
@@ -91,7 +91,6 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 			}
 		}
 	}
-
 
 	for _, cs := range convertSources {
 		err = cs.Whisper.Close()
