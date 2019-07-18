@@ -33,7 +33,7 @@ func checkAgeFiles(xmlFiles []*XmlNagios, oldest int64) []*XmlNagios {
 	todoFiles := make([]*XmlNagios, 0, len(xmlFiles))
 
 	for _, fl := range xmlFiles {
-		if _, err := os.Stat(fl.OkPath); os.IsNotExist(err) {
+		if fl.TimeT >= oldest {
 			todoFiles = append(todoFiles, fl)
 		}
 	}

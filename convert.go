@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
 	"github.com/jabdr/rrd"
@@ -12,23 +13,22 @@ import (
 type convertSource struct {
 	WspName             string
 	DestinationFilename string
-	SourceFilename      string
+	TempFilename        string
 	Whisper             *whisper.Whisper
 }
 
-
 type dataCache struct {
-	values []*whisper.TimeSeriesPoint
-	sources int
+	values    []*whisper.TimeSeriesPoint
+	sources   int
 	positions []int
-	size int
+	size      int
 }
 
 func newDataCache(sources, cacheSize int) *dataCache {
 	dc := new(dataCache)
 	dc.sources = sources
 	dc.size = cacheSize
-	dc.values = make([]*whisper.TimeSeriesPoint, cacheSize * sources)
+	dc.values = make([]*whisper.TimeSeriesPoint, cacheSize*sources)
 	dc.positions = make([]int, sources)
 	for i := 0; i < sources; i++ {
 		dc.positions[i] = i * cacheSize
@@ -41,7 +41,7 @@ func (dc *dataCache) addRow(ts int, values []float64) (full bool) {
 	for i, value := range values {
 		pos := dc.positions[i]
 		dc.values[pos] = &whisper.TimeSeriesPoint{
-			Time: ts,
+			Time:  ts,
 			Value: value,
 		}
 		dc.positions[i] = pos + 1
@@ -73,15 +73,24 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 	convertSources := make([]convertSource, len(xml.Datasources))
 	for i, ds := range xml.Datasources {
 		convertSources[i].WspName = replaceIllegalCharacters(ds.Name)
-		convertSources[i].SourceFilename = fmt.Sprintf("%s/%s.wsp", tmpdir, convertSources[i].WspName)
+		convertSources[i].TempFilename = fmt.Sprintf("%s/%s.wsp", tmpdir, convertSources[i].WspName)
 		convertSources[i].DestinationFilename = fmt.Sprintf("%s/%s.wsp", destdir, convertSources[i].WspName)
-		convertSources[i].Whisper, err = whisper.Create(convertSources[i].SourceFilename, whisperRetention, whisper.Average, 0.5)
+		convertSources[i].Whisper, err = whisper.Create(convertSources[i].TempFilename, whisperRetention, whisper.Average, 0.5)
 		if err != nil {
 			return fmt.Errorf("Could not create whisper file: %s", err)
 		}
 	}
 	numSources := len(convertSources)
-	cache := newDataCache(numSources, 10000)
+	cache := newDataCache(numSources, 100000)
+	flushCache := func() error {
+		for i := 0; i < numSources; i++ {
+			err = convertSources[i].Whisper.UpdateMany(cache.rowForSource(i))
+			if err != nil {
+				return fmt.Errorf("Could not update whisper file: %s", err)
+			}
+		}
+		return nil
+	}
 
 	startTime := convertSources[0].Whisper.StartTime()
 	lastTime := startTime
@@ -100,14 +109,14 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 		lastTime = ts
 		full := cache.addRow(ts, row.Values)
 		if full {
-			for i := 0; i < numSources; i++ {
-				err = convertSources[i].Whisper.UpdateMany(cache.rowForSource(i))
-				if err != nil {
-					return fmt.Errorf("Could not update whisper file: %s", err)
-				}
+			if err = flushCache(); err != nil {
+				return err
 			}
-			cache = newDataCache(numSources, 10000)
+			cache = newDataCache(numSources, 100000)
 		}
+	}
+	if err = flushCache(); err != nil {
+		return err
 	}
 
 	for _, cs := range convertSources {
@@ -115,16 +124,21 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 			if mergeExisting {
 				oldws, err := whisper.Open(cs.DestinationFilename)
 				if err != nil {
-					// TODO: Not break here
 					return fmt.Errorf("Could not open old whisper databaase: %s", err)
 				}
-				timeSeries, err := oldws.Fetch(lastTime, int(time.Now().Unix()))
+				timeSeries, err := oldws.Fetch(lastTime+60, int(time.Now().Unix()))
 				if err != nil {
-					// TODO: Not break here
 					return fmt.Errorf("Could not fetch data from old whisper database: %s", err)
 				}
-				for _, point := range timeSeries.Points() {
-					cs.Whisper.Update(point.Value, point.Time)
+				pts := timeSeries.PointPointers()
+				cleanPoints := make([]*whisper.TimeSeriesPoint, 0, len(pts))
+				for _, pt := range pts {
+					if !math.IsNaN(pt.Value) {
+						cleanPoints = append(cleanPoints, pt)
+					}
+				}
+				if err = cs.Whisper.UpdateMany(cleanPoints); err != nil {
+					return fmt.Errorf("could not merge data from old whisper file: %s", err)
 				}
 				oldws.Close()
 			}
@@ -147,20 +161,17 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 		}
 	}
 
-	err = os.MkdirAll(destdir, 0755)
-	if err != nil {
+	if err = os.MkdirAll(destdir, 0755); err != nil {
 		return fmt.Errorf("Could not create destination directory: %s", err)
 	}
 
-	for _, ds := range xml.Datasources {
-		wspname := replaceIllegalCharacters(ds.Name)
-		err = os.Rename(fmt.Sprintf("%s/%s.wsp", tmpdir, wspname), fmt.Sprintf("%s/%s.wsp", destdir, wspname))
-		if err != nil {
+	for _, cs := range convertSources {
+		if err = os.Rename(cs.TempFilename, cs.DestinationFilename); err != nil {
 			return fmt.Errorf("Could not move wsp file to destination directory: %s", err)
 		}
 	}
 
-	okFl, err := os.OpenFile(xml.OkPath, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+	okFl, err := os.OpenFile(xml.OkPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("Could not create %s file: %s", xml.OkPath, err)
 	}

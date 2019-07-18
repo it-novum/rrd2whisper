@@ -116,11 +116,11 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for job := range jobs {
-				bar.Increment()
 				err := convertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge)
 				if err != nil {
 					log.Printf("Error: Could not convert rrd file %s: %s", job.RrdPath, err)
 				}
+				bar.Increment()
 			}
 			wg.Done()
 		}()
