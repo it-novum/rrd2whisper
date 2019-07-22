@@ -1,11 +1,11 @@
 package main
 
 import (
-	"log"
 	"flag"
 	"fmt"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,7 +23,10 @@ type Cli struct {
 	retention       string
 	checkOnly       bool
 	noMerge         bool
-	logfile string
+	mysqlDSN        string
+	mysqlINI        string
+	logfile         string
+	nosql           bool
 }
 
 func parseCli() (*Cli, error) {
@@ -41,6 +44,9 @@ func parseCli() (*Cli, error) {
 	flag.BoolVar(&cli.checkOnly, "check", false, "do not convert, only check for xml files")
 	flag.BoolVar(&cli.noMerge, "no-merge", false, "don't try to merge data if destination directory and whisper file exists")
 	flag.StringVar(&cli.logfile, "logfile", "/var/log/rrd2whisper.log", "Path to logfile")
+	flag.StringVar(&cli.mysqlDSN, "mysql-dsn", "", "mysql connection dsn (overwrites -mysql-ini, see https://github.com/go-sql-driver/mysql#dsn-data-source-name)")
+	flag.StringVar(&cli.mysqlINI, "mysql-ini", "/etc/openitcockpit/mysql.cnf", "path to mysql ini with connection credentials")
+	flag.BoolVar(&cli.nosql, "no-sql", false, "Don't query the database for correct perfdata names")
 	flag.Parse()
 
 	if cli.workers <= 0 {
@@ -55,6 +61,11 @@ func parseCli() (*Cli, error) {
 	}
 	if cli.includeCorrupt {
 		fmt.Println("Converting corrupt rrd files! This usually doesn't make any sense and produces only garbage.")
+	}
+	if !cli.nosql && cli.mysqlDSN == "" {
+		if _, err = os.Stat(cli.mysqlINI); os.IsNotExist(err) {
+			return cli, fmt.Errorf("mysql ini does not exist and no dsn is specified")
+		}
 	}
 	if !cli.checkOnly {
 		if cli.destDirectory == "" {
@@ -84,12 +95,22 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	lf, err := os.OpenFile(cli.logfile, os.O_CREATE | os.O_APPEND | os.O_WRONLY, 0644)
+	lf, err := os.OpenFile(cli.logfile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Could not open log file: %s", err)
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
+
+	var oitc *oitcDB
+	if !cli.nosql {
+		oitc, err := newOitcDB(cli.mysqlDSN, cli.mysqlINI)
+		if err != nil {
+			log.Fatalf("Could not connect to mysql: %s", err)
+		}
+		defer oitc.close()
+	}
+
 
 	logAndPrintf("Search %s for xml perfdata files\n", cli.sourceDirectory)
 	workdata := gatherWorkdata(cli)
@@ -116,9 +137,11 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for job := range jobs {
-				err := convertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge)
+				err := convertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
 				if err != nil {
 					log.Printf("Error: Could not convert rrd file %s: %s", job.RrdPath, err)
+				} else {
+					log.Printf("Successfully converted %s to whisper", job.RrdPath)
 				}
 				bar.Increment()
 			}

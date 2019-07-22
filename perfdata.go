@@ -36,22 +36,22 @@ func perfdataParseValue(valueStr string) (*Perfdata, error) {
 		return nil, fmt.Errorf("Invalid perfdata value: %s", valueStr)
 	}
 	// 'label'=value[UOM];[warn];[crit];[min];[max]
-	if dataLen == 5 {
+	if dataLen == 5 && data[4] != "" {
 		if pd.max, err = strconv.ParseFloat(data[4], 64); err != nil {
 			return nil, fmt.Errorf("Could not parse max value \"%s\": %s", data[4], err)
 		}
 	}
-	if dataLen >= 4 {
+	if dataLen >= 4 && data[3] != "" {
 		if pd.min, err = strconv.ParseFloat(data[3], 64); err != nil {
 			return nil, fmt.Errorf("Could not parse min value \"%s\": %s", data[3], err)
 		}
 	}
-	if dataLen >= 3 {
+	if dataLen >= 3 && data[2] != "" {
 		if pd.critical, err = strconv.ParseFloat(data[2], 64); err != nil {
 			return nil, fmt.Errorf("Could not parse critical value \"%s\": %s", data[2], err)
 		}
 	}
-	if dataLen >= 2 {
+	if dataLen >= 2 && data[1] != "" {
 		if pd.warning, err = strconv.ParseFloat(data[1], 64); err != nil {
 			return nil, fmt.Errorf("Could not parse warning value \"%s\": %s", data[1], err)
 		}

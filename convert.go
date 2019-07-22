@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+	"log"
 	"math"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
@@ -56,10 +58,29 @@ func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
 	return dc.values[startPos:endPos]
 }
 
-func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) error {
+func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcDB) error {
+	var perfdata []*Perfdata
+
+	if oitc != nil {
+		perfStr, err := oitc.fetchPerfdata(xml.Servicename)
+		if err != nil {
+			return err
+		}
+		if perfStr != "" {
+			perfdata, err = parsePerfdata(perfStr)
+			if err != nil {
+				log.Printf("Service %s has invalid perfdata in db: %s", xml.Servicename, err)
+			} else {
+				if len(perfdata) != len(xml.Datasources) {
+					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdata), len(xml.Datasources))
+				}
+			}
+		}
+	}
+
 	dumper, err := rrd.NewDumper(xml.RrdPath, "AVERAGE")
 	if err != nil {
-		return fmt.Errorf("Could not dump rrd file: %s", err)
+		return fmt.Errorf("could not dump rrd file: %s", err)
 	}
 
 	destdir := fmt.Sprintf("%s/%s/%s", dest, xml.Hostname, xml.Servicename)
@@ -70,16 +91,29 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool) 
 	}
 	defer os.RemoveAll(tmpdir)
 
+	var logstr strings.Builder
+	pflen := 0
+	if perfdata != nil {
+		pflen = len(perfdata)
+	}
+	logstr.WriteString(fmt.Sprintf("%s has %d datasources and %d perfdata values", xml.RrdPath, len(xml.Datasources), pflen))
 	convertSources := make([]convertSource, len(xml.Datasources))
 	for i, ds := range xml.Datasources {
-		convertSources[i].WspName = replaceIllegalCharacters(ds.Name)
+		rawName := ds.Name
+		if perfdata != nil {
+			rawName = perfdata[i].label
+		}
+		convertSources[i].WspName = replaceIllegalCharacters(rawName)
 		convertSources[i].TempFilename = fmt.Sprintf("%s/%s.wsp", tmpdir, convertSources[i].WspName)
 		convertSources[i].DestinationFilename = fmt.Sprintf("%s/%s.wsp", destdir, convertSources[i].WspName)
 		convertSources[i].Whisper, err = whisper.Create(convertSources[i].TempFilename, whisperRetention, whisper.Average, 0.5)
 		if err != nil {
 			return fmt.Errorf("Could not create whisper file: %s", err)
 		}
+		logstr.WriteString(fmt.Sprintf(" DS%d: `%s`", i, rawName))
 	}
+	logstr.WriteString("\n")
+	log.Print(logstr.String())
 	numSources := len(convertSources)
 	cache := newDataCache(numSources, 100000)
 	flushCache := func() error {
