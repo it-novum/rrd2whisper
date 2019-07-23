@@ -62,14 +62,16 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, 
 	var perfdata []*Perfdata
 
 	if oitc != nil {
+		log.Printf("check for perfdata in db")
 		perfStr, err := oitc.fetchPerfdata(xml.Servicename)
 		if err != nil {
 			return err
 		}
+		log.Printf("got perfdata %s", perfStr)
 		if perfStr != "" {
 			perfdata, err = parsePerfdata(perfStr)
 			if err != nil {
-				log.Printf("Service %s has invalid perfdata in db: %s", xml.Servicename, err)
+				log.Printf("service %s has invalid perfdata in db: %s\n", xml.Servicename, err)
 			} else {
 				if len(perfdata) != len(xml.Datasources) {
 					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdata), len(xml.Datasources))

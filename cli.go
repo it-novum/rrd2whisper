@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/go-sql-driver/mysql"
 	"flag"
 	"fmt"
 	"github.com/vbauerster/mpb/v4"
@@ -25,6 +26,7 @@ type Cli struct {
 	noMerge         bool
 	mysqlDSN        string
 	mysqlINI        string
+	mysqlRetry		int
 	logfile         string
 	nosql           bool
 }
@@ -47,6 +49,7 @@ func parseCli() (*Cli, error) {
 	flag.StringVar(&cli.mysqlDSN, "mysql-dsn", "", "mysql connection dsn (overwrites -mysql-ini, see https://github.com/go-sql-driver/mysql#dsn-data-source-name)")
 	flag.StringVar(&cli.mysqlINI, "mysql-ini", "/etc/openitcockpit/mysql.cnf", "path to mysql ini with connection credentials")
 	flag.BoolVar(&cli.nosql, "no-sql", false, "Don't query the database for correct perfdata names")
+	flag.IntVar(&cli.mysqlRetry, "mysql-retry", 30, "retry N times if connection to mysql server is lost with 1s delay")
 	flag.Parse()
 
 	if cli.workers <= 0 {
@@ -67,6 +70,9 @@ func parseCli() (*Cli, error) {
 			return cli, fmt.Errorf("mysql ini does not exist and no dsn is specified")
 		}
 	}
+	if cli.mysqlRetry <= 0 {
+		cli.mysqlRetry = 1
+	}
 	if !cli.checkOnly {
 		if cli.destDirectory == "" {
 			return cli, fmt.Errorf("need -dest for whisper files output")
@@ -82,8 +88,19 @@ func parseCli() (*Cli, error) {
 }
 
 func logAndPrintf(format string, v ...interface{}) {
-	log.Printf(format, v...)
 	fmt.Printf(format, v...)
+	log.Printf(format, v...)
+}
+
+func logAndFatalf(format string, v ...interface{}) {
+	fmt.Printf(format, v...)
+	log.Fatalf(format, v...)
+}
+
+type mysqlLogger struct {}
+
+func (lg *mysqlLogger) Print(v ...interface{}) {
+	log.Print(v...)
 }
 
 func main() {
@@ -101,12 +118,13 @@ func main() {
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
+	mysql.SetLogger(&mysqlLogger{})
 
 	var oitc *oitcDB
 	if !cli.nosql {
-		oitc, err := newOitcDB(cli.mysqlDSN, cli.mysqlINI)
+		oitc, err = newOitcDB(cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
 		if err != nil {
-			log.Fatalf("Could not connect to mysql: %s", err)
+			logAndFatalf("could not connect to mysql: %s\n", err)
 		}
 		defer oitc.close()
 	}

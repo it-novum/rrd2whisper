@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"database/sql"
 	"fmt"
 	"github.com/go-ini/ini"
@@ -9,12 +10,15 @@ import (
 )
 
 type oitcDB struct {
-	db *sql.DB
+	db         *sql.DB
+	retry      int
 }
 
-func newOitcDB(dsn string, ini string) (*oitcDB, error) {
+func newOitcDB(dsn string, ini string, retry int) (*oitcDB, error) {
 	var err error
-	oitc := new(oitcDB)
+	oitc := &oitcDB{
+		retry:      retry,
+	}
 	if dsn == "" {
 		if dsn, err = readMySQLINI(ini); err != nil {
 			return nil, err
@@ -77,24 +81,41 @@ func (oitc *oitcDB) close() error {
 	return oitc.db.Close()
 }
 
-func (oitc *oitcDB) fetchPerfdata(servicename string) (string, error) {
+func (oitc *oitcDB) queryPerfdata(servicename string) (string, error) {
 	row := oitc.db.QueryRow(
 		"SELECT nagios_objects.object_id, nagios_servicechecks.perfdata, MAX(nagios_servicechecks.start_time) AS start_time, nagios_objects.name2 "+
 			"FROM nagios_objects INNER JOIN nagios_servicechecks ON nagios_servicechecks.service_object_id = nagios_objects.object_id "+
 			"WHERE nagios_objects.name2 = ? "+
 			"AND nagios_servicechecks.perfdata IS NOT NULL "+
 			"GROUP BY nagios_objects.object_id", servicename)
-	var objectID int64
-	var perfdata string
-	var startTime time.Time
-	var uuid string
+	var (
+		objectID  int64
+		perfdata  string
+		startTime time.Time
+		uuid      string
+	)
 	err := row.Scan(&objectID, &perfdata, &startTime, &uuid)
 	switch {
 	case err == sql.ErrNoRows:
 		return "", nil
 	case err != nil:
-		return "", fmt.Errorf("query error: %v", err)
+		return "", err
 	default:
 		return perfdata, nil
 	}
+}
+
+func (oitc *oitcDB) fetchPerfdata(servicename string) (string, error) {
+	var res string
+	var err error
+	for currentTry := 0; currentTry < oitc.retry; currentTry++ {
+		res, err = oitc.queryPerfdata(servicename)
+		if err != nil {
+			time.Sleep(time.Second)
+			log.Printf("lost connection to mysql server -> retry\n")
+		} else {
+			return res, err
+		}
+	}
+	return res, err
 }
