@@ -1,7 +1,8 @@
 package main
 
 import (
-	"github.com/go-sql-driver/mysql"
+	"context"
+	"github.com/it-novum/rrd2whisper/oitcdb"
 	"flag"
 	"fmt"
 	"github.com/vbauerster/mpb/v4"
@@ -97,12 +98,6 @@ func logAndFatalf(format string, v ...interface{}) {
 	log.Fatalf(format, v...)
 }
 
-type mysqlLogger struct {}
-
-func (lg *mysqlLogger) Print(v ...interface{}) {
-	log.Print(v...)
-}
-
 func main() {
 	cli, err := parseCli()
 	if err != nil {
@@ -118,15 +113,14 @@ func main() {
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
-	mysql.SetLogger(&mysqlLogger{})
 
-	var oitc *oitcDB
+	var oitc *oitcdb.OITC
 	if !cli.nosql {
-		oitc, err = newOitcDB(cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
+		oitc, err = oitcdb.NewOITC(context.Background(), cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
 		if err != nil {
 			logAndFatalf("could not connect to mysql: %s\n", err)
 		}
-		defer oitc.close()
+		defer oitc.Close()
 	}
 
 

@@ -5,6 +5,7 @@ require (
 	github.com/go-ini/ini v1.44.0
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/google/go-cmp v0.3.0 // indirect
+	github.com/jabdr/nagios-perfdata v1.0.0
 	github.com/jabdr/rrd v1.3.1
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/smartystreets/goconvey v0.0.0-20190710185942-9d28bd7c0945 // indirect

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/it-novum/rrd2whisper/oitcdb"
+	"github.com/jabdr/nagios-perfdata"
 	"strings"
 	"log"
 	"math"
@@ -58,23 +60,23 @@ func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
 	return dc.values[startPos:endPos]
 }
 
-func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcDB) error {
-	var perfdata []*Perfdata
+func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
+	var perfdatas []*perfdata.Perfdata
 
 	if oitc != nil {
 		log.Printf("check for perfdata in db")
-		perfStr, err := oitc.fetchPerfdata(xml.Servicename)
+		perfStr, err := oitc.FetchPerfdata(xml.Servicename)
 		if err != nil {
 			return err
 		}
 		log.Printf("got perfdata %s", perfStr)
 		if perfStr != "" {
-			perfdata, err = parsePerfdata(perfStr)
+			perfdatas, err = perfdata.ParsePerfdata(perfStr)
 			if err != nil {
 				log.Printf("service %s has invalid perfdata in db: %s\n", xml.Servicename, err)
 			} else {
-				if len(perfdata) != len(xml.Datasources) {
-					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdata), len(xml.Datasources))
+				if len(perfdatas) != len(xml.Datasources) {
+					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdatas), len(xml.Datasources))
 				}
 			}
 		}
@@ -95,15 +97,15 @@ func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, 
 
 	var logstr strings.Builder
 	pflen := 0
-	if perfdata != nil {
-		pflen = len(perfdata)
+	if perfdatas != nil {
+		pflen = len(perfdatas)
 	}
 	logstr.WriteString(fmt.Sprintf("%s has %d datasources and %d perfdata values", xml.RrdPath, len(xml.Datasources), pflen))
 	convertSources := make([]convertSource, len(xml.Datasources))
 	for i, ds := range xml.Datasources {
 		rawName := ds.Name
-		if perfdata != nil {
-			rawName = perfdata[i].label
+		if perfdatas != nil {
+			rawName = perfdatas[i].Label
 		}
 		convertSources[i].WspName = replaceIllegalCharacters(rawName)
 		convertSources[i].TempFilename = fmt.Sprintf("%s/%s.wsp", tmpdir, convertSources[i].WspName)
