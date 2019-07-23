@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/it-novum/rrd2whisper/rrdpath"
 	"context"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"flag"
@@ -143,7 +144,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	jobs := make(chan *XmlNagios, cli.workers+1)
+	jobs := make(chan *rrdpath.XMLNagios, cli.workers+1)
 
 	for i := 0; i < cli.workers; i++ {
 		wg.Add(1)

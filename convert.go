@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/jabdr/nagios-perfdata"
 	"strings"
@@ -60,7 +61,7 @@ func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
 	return dc.values[startPos:endPos]
 }
 
-func convertRrd(xml *XmlNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
+func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
 	var perfdatas []*perfdata.Perfdata
 
 	if oitc != nil {
