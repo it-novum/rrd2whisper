@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/it-novum/rrd2whisper/converter"
 	"time"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"context"
@@ -105,10 +106,11 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	err = initGlobals(cli)
-	if err != nil {
+
+	if err = converter.SetRetention(cli.retention); err != nil {
 		log.Fatalln(err)
 	}
+
 	lf, err := os.OpenFile(cli.logfile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Could not open log file: %s", err)
@@ -125,7 +127,7 @@ func main() {
 		defer oitc.Close()
 	}
 
-
+	// TODO: age
 	logAndPrintf("Search %s for xml perfdata files\n", cli.sourceDirectory)
 	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
 	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(context.Background(), cli.sourceDirectory), oldest, cli.limit)
@@ -161,7 +163,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			for job := range jobs {
-				err := convertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
+				err := converter.ConvertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
 				if err != nil {
 					log.Printf("Error: Could not convert rrd file %s: %s", job.RrdPath, err)
 				} else {

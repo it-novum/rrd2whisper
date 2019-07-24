@@ -78,21 +78,32 @@ func Walk(ctx context.Context, path string) *RrdPath {
 
 	go func(rrdPath *RrdPath) {
 		done := rrdPath.ctx.Done()
-		err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		err := filepath.Walk(path, func(path string, info os.FileInfo, errin error) error {
+			var (
+			    err error
+			    xmlNagios *XMLNagios
+			)
 			if !info.IsDir() && strings.HasSuffix(info.Name(), ".xml") {
-				xmlNagios, err := parseRrdXML(path)
+				xmlNagios, err = parseRrdXML(path)
 				if err != nil {
 					atomic.AddUint64(&rrdPath.brokenXMLCount, 1)
 					log.Printf("Could not read xml file: %s", err)
-				} else {
-					rrdPath.results <- xmlNagios
 				}
 			}
-			select {
-			case <-done:
-				return rrdPath.ctx.Err()
-			default:
-				return nil
+			if xmlNagios != nil {
+				select {
+				case <-done:
+					return rrdPath.ctx.Err()
+				case rrdPath.results <- xmlNagios:
+					return nil
+				}
+			} else {
+				select {
+				case <-done:
+					return rrdPath.ctx.Err()
+				default:
+					return nil
+				}
 			}
 		})
 		rrdPath.err = err

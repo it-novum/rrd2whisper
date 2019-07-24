@@ -1,6 +1,8 @@
-package main
+package converter
 
 import (
+	"context"
+	"regexp"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/jabdr/nagios-perfdata"
@@ -9,11 +11,28 @@ import (
 	"math"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
-	"github.com/jabdr/rrd"
 	"io/ioutil"
 	"os"
 	"time"
 )
+
+var illegalCharactersRegexp = regexp.MustCompile(`[^a-zA-Z^0-9\\-\\.]`)
+
+func replaceIllegalCharacters(s string) string {
+	return illegalCharactersRegexp.ReplaceAllString(s, "_")
+}
+
+var whisperRetention whisper.Retentions
+
+func SetRetention(retention string) error {
+	var err error
+	whisperRetention, err = whisper.ParseRetentionDefs(retention)
+	if err != nil {
+		return fmt.Errorf("could not parse whisper retention: %s", err)
+	}
+	return nil
+}
+
 
 type convertSource struct {
 	WspName             string
@@ -22,46 +41,7 @@ type convertSource struct {
 	Whisper             *whisper.Whisper
 }
 
-type dataCache struct {
-	values    []*whisper.TimeSeriesPoint
-	sources   int
-	positions []int
-	size      int
-}
-
-func newDataCache(sources, cacheSize int) *dataCache {
-	dc := new(dataCache)
-	dc.sources = sources
-	dc.size = cacheSize
-	dc.values = make([]*whisper.TimeSeriesPoint, cacheSize*sources)
-	dc.positions = make([]int, sources)
-	for i := 0; i < sources; i++ {
-		dc.positions[i] = i * cacheSize
-	}
-	return dc
-}
-
-func (dc *dataCache) addRow(ts int, values []float64) (full bool) {
-	full = false
-	for i, value := range values {
-		pos := dc.positions[i]
-		dc.values[pos] = &whisper.TimeSeriesPoint{
-			Time:  ts,
-			Value: value,
-		}
-		dc.positions[i] = pos + 1
-	}
-	full = dc.positions[0] == dc.size
-	return full
-}
-
-func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
-	startPos := source * dc.size
-	endPos := dc.positions[source]
-	return dc.values[startPos:endPos]
-}
-
-func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
+func ConvertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
 	var perfdatas []*perfdata.Perfdata
 
 	if oitc != nil {
@@ -84,12 +64,12 @@ func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExistin
 		}
 	}
 
-	dumper, err := rrd.NewDumper(rrdSet.RrdPath, "AVERAGE")
-	if err != nil {
-		return fmt.Errorf("could not dump rrd file: %s", err)
-	}
-
 	destdir := fmt.Sprintf("%s/%s/%s", dest, rrdSet.Hostname, rrdSet.Servicename)
+
+	dumperHelper, err := NewRrdDumperHelper(context.Background(), rrdSet.RrdPath)
+	if err != nil {
+		return err
+	}
 
 	tmpdir, err := ioutil.TempDir("/tmp", "rrd2whisper")
 	if err != nil {
@@ -121,7 +101,7 @@ func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExistin
 	logstr.WriteString("\n")
 	log.Print(logstr.String())
 	numSources := len(convertSources)
-	cache := newDataCache(numSources, 100000)
+	cache := newTimeSeriesCache(numSources, 100000)
 	flushCache := func() error {
 		for i := 0; i < numSources; i++ {
 			err = convertSources[i].Whisper.UpdateMany(cache.rowForSource(i))
@@ -135,16 +115,7 @@ func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExistin
 	startTime := convertSources[0].Whisper.StartTime()
 	lastTime := startTime
 
-	rowChan := make(chan *rrd.RrdDumpRow, 10000)
-
-	go func() {
-		for row := dumper.Next(); row != nil; row = dumper.Next() {
-			rowChan <- row
-		}
-		close(rowChan)
-	}()
-
-	for row := range rowChan {
+	for row := range dumperHelper.Results() {
 		ts := int(row.Time.Unix())
 		lastTime = ts
 		full := cache.addRow(ts, row.Values)
@@ -152,7 +123,7 @@ func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExistin
 			if err = flushCache(); err != nil {
 				return err
 			}
-			cache = newDataCache(numSources, 100000)
+			cache = newTimeSeriesCache(numSources, 100000)
 		}
 	}
 	if err = flushCache(); err != nil {
