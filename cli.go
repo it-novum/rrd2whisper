@@ -13,11 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"time"
 )
 
-type Cli struct {
+type commandLine struct {
 	sourceDirectory string
 	repDirectory    string
 	destDirectory   string
@@ -35,10 +34,10 @@ type Cli struct {
 	nosql           bool
 }
 
-func parseCli() (*Cli, error) {
+func parseCli() (*commandLine, error) {
 	var err error
 
-	cli := new(Cli)
+	cli := new(commandLine)
 	flag.StringVar(&cli.sourceDirectory, "source", "", "Path to source directory file tree of rrd files")
 	flag.StringVar(&cli.destDirectory, "dest", "", "Destination of file tree for whisper")
 	flag.StringVar(&cli.repDirectory, "rep", "", "Path where replaced whisper files are stored")
@@ -118,25 +117,27 @@ func main() {
 	defer lf.Close()
 	log.SetOutput(lf)
 
+	ctx := context.Background()
+
 	var oitc *oitcdb.OITC
 	if !cli.nosql {
-		oitc, err = oitcdb.NewOITC(context.Background(), cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
+		oitc, err = oitcdb.NewOITC(ctx, cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
 		if err != nil {
 			logAndFatalf("could not connect to mysql: %s\n", err)
 		}
 		defer oitc.Close()
 	}
 
-	// TODO: age
-	logAndPrintf("Search %s for xml perfdata files\n", cli.sourceDirectory)
+	// TODO: age zero == all
+	logAndPrintf("Scanning %s for xml perfdata files\n", cli.sourceDirectory)
 	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
-	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(context.Background(), cli.sourceDirectory), oldest, cli.limit)
+	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(ctx, cli.sourceDirectory), oldest, cli.limit)
 	if err != nil {
 		logAndFatalf("Could not scan rrd path: %s", err)
 	}
 
 	logAndPrintf(
-		"Total: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
+		"Scanning finished\nTotal: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
 		workdata.Total,
 		workdata.Todo,
 		len(workdata.RrdSets),
@@ -154,34 +155,7 @@ func main() {
 		mpb.AppendDecorators(decor.Percentage()),
 	)
 
-	var wg sync.WaitGroup
-
-	jobs := make(chan *rrdpath.RrdSet, cli.parallel+1)
-
-	logAndPrintf("Start converting rrd files")
-	for i := 0; i < cli.parallel; i++ {
-		wg.Add(1)
-		go func() {
-			cvt := converter.NewConverter(context.Background(), cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
-			for job := range jobs {
-				if err := cvt.Convert(job); err != nil {
-					log.Printf("error: Could not convert rrd file %s: %s", job.RrdPath, err)
-				} else {
-					log.Printf("successfully converted %s to whisper", job.RrdPath)
-				}
-				bar.Increment()
-			}
-			wg.Done()
-		}()
-	}
-	wg.Add(1)
-	go func() {
-		for _, rrdSet := range workdata.RrdSets {
-			jobs <- rrdSet
-		}
-		close(jobs)
-		wg.Done()
-	}()
-
-	wg.Wait()
+	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
+	worker := converter.NewWorker(ctx, workdata.RrdSets, cli.parallel, cvt, bar)
+	worker.WaitGroup.Wait()
 }

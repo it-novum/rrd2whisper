@@ -56,12 +56,10 @@ func NewConverter(ctx context.Context, destination string, archivePath string, m
 
 func (cvt *Converter) checkPerfdata(servicename string) ([]string, error) {
 	if cvt.oitc != nil {
-		log.Printf("check for perfdata in db")
 		perfStr, err := cvt.oitc.FetchPerfdata(servicename)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("perfdata in db %s", perfStr)
 		if perfStr != "" {
 			pfdatas, err := perfdata.ParsePerfdata(perfStr)
 			if err != nil {
