@@ -8,8 +8,8 @@ import (
 
 // RrdDumperHelper wrapps arround rrd.RrdDumper to provide a cancable worker
 type RrdDumperHelper struct {
-	ctx context.Context
-	dumper *rrd.RrdDumper
+	ctx     context.Context
+	dumper  *rrd.RrdDumper
 	results chan *rrd.RrdDumpRow
 }
 
@@ -17,7 +17,7 @@ type RrdDumperHelper struct {
 func NewRrdDumperHelper(ctx context.Context, path string) (*RrdDumperHelper, error) {
 	var err error
 	rdh := &RrdDumperHelper{
-		ctx: ctx,
+		ctx:     ctx,
 		results: make(chan *rrd.RrdDumpRow, 1000),
 	}
 	rdh.dumper, err = rrd.NewDumper(path, "AVERAGE")
@@ -32,7 +32,7 @@ func NewRrdDumperHelper(ctx context.Context, path string) (*RrdDumperHelper, err
 			case <-done:
 				close(rdh.results)
 				return
-			case rdh.results<-row:
+			case rdh.results <- row:
 			}
 		}
 		close(rdh.results)

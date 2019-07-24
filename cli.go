@@ -1,13 +1,12 @@
 package main
 
 import (
-	"github.com/it-novum/rrd2whisper/converter"
-	"time"
-	"github.com/it-novum/rrd2whisper/rrdpath"
 	"context"
-	"github.com/it-novum/rrd2whisper/oitcdb"
 	"flag"
 	"fmt"
+	"github.com/it-novum/rrd2whisper/converter"
+	"github.com/it-novum/rrd2whisper/oitcdb"
+	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
 	"log"
@@ -15,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 )
 
 type Cli struct {
@@ -24,13 +24,13 @@ type Cli struct {
 	includeCorrupt  bool
 	maxAge          int64
 	limit           int
-	workers         int
+	parallel        int
 	retention       string
 	checkOnly       bool
 	noMerge         bool
 	mysqlDSN        string
 	mysqlINI        string
-	mysqlRetry		int
+	mysqlRetry      int
 	logfile         string
 	nosql           bool
 }
@@ -45,7 +45,7 @@ func parseCli() (*Cli, error) {
 	flag.BoolVar(&cli.includeCorrupt, "include-corrupt", false, "Include rrd files that could not be updated")
 	flag.Int64Var(&cli.maxAge, "max-age", 1209600, "Maximum age of an rrd file to be included (in seconds since last update, default 2 weeks, 0=all)")
 	flag.IntVar(&cli.limit, "limit", 0, "Limit number of rrd's in one step, 0=unlimited")
-	flag.IntVar(&cli.workers, "workers", runtime.NumCPU(), "Number of workers running parallel")
+	flag.IntVar(&cli.parallel, "parallel", runtime.NumCPU(), "Number of files processed in parallel")
 	flag.StringVar(&cli.retention, "retention", "60s:365d", "retention for whisper files")
 	flag.BoolVar(&cli.checkOnly, "check", false, "do not convert, only check for xml files")
 	flag.BoolVar(&cli.noMerge, "no-merge", false, "don't try to merge data if destination directory and whisper file exists")
@@ -56,8 +56,8 @@ func parseCli() (*Cli, error) {
 	flag.IntVar(&cli.mysqlRetry, "mysql-retry", 30, "retry N times if connection to mysql server is lost with 1s delay")
 	flag.Parse()
 
-	if cli.workers <= 0 {
-		cli.workers = 1
+	if cli.parallel <= 0 {
+		cli.parallel = 1
 	}
 
 	if _, err = os.Stat(cli.sourceDirectory); os.IsNotExist(err) {
@@ -134,7 +134,7 @@ func main() {
 	if err != nil {
 		logAndFatalf("Could not scan rrd path: %s", err)
 	}
-	
+
 	logAndPrintf(
 		"Total: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
 		workdata.Total,
@@ -156,18 +156,18 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	jobs := make(chan *rrdpath.RrdSet, cli.workers+1)
+	jobs := make(chan *rrdpath.RrdSet, cli.parallel+1)
 
 	logAndPrintf("Start converting rrd files")
-	for i := 0; i < cli.workers; i++ {
+	for i := 0; i < cli.parallel; i++ {
 		wg.Add(1)
 		go func() {
+			cvt := converter.NewConverter(context.Background(), cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
 			for job := range jobs {
-				err := converter.ConvertRrd(job, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
-				if err != nil {
-					log.Printf("Error: Could not convert rrd file %s: %s", job.RrdPath, err)
+				if err := cvt.Convert(job); err != nil {
+					log.Printf("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 				} else {
-					log.Printf("Successfully converted %s to whisper", job.RrdPath)
+					log.Printf("successfully converted %s to whisper", job.RrdPath)
 				}
 				bar.Increment()
 			}

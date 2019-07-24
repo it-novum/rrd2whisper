@@ -2,17 +2,17 @@ package converter
 
 import (
 	"context"
-	"regexp"
-	"github.com/it-novum/rrd2whisper/rrdpath"
-	"github.com/it-novum/rrd2whisper/oitcdb"
-	"github.com/jabdr/nagios-perfdata"
-	"strings"
-	"log"
-	"math"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
+	"github.com/it-novum/rrd2whisper/oitcdb"
+	"github.com/it-novum/rrd2whisper/rrdpath"
+	"github.com/jabdr/nagios-perfdata"
 	"io/ioutil"
+	"log"
+	"math"
 	"os"
+	"path/filepath"
+	"regexp"
 	"time"
 )
 
@@ -24,6 +24,7 @@ func replaceIllegalCharacters(s string) string {
 
 var whisperRetention whisper.Retentions
 
+// SetRetention must be called before first conversion
 func SetRetention(retention string) error {
 	var err error
 	whisperRetention, err = whisper.ParseRetentionDefs(retention)
@@ -33,152 +34,201 @@ func SetRetention(retention string) error {
 	return nil
 }
 
+// Converter converts rrd files to whisper
+type Converter struct {
+	merge       bool
+	destination string
+	archivePath string
+	oitc        *oitcdb.OITC
+	ctx         context.Context
+}
+
+// NewConverter is the constructor for Converter
+func NewConverter(ctx context.Context, destination string, archivePath string, merge bool, oitc *oitcdb.OITC) *Converter {
+	return &Converter{
+		merge:       merge,
+		destination: destination,
+		archivePath: archivePath,
+		oitc:        oitc,
+		ctx:         ctx,
+	}
+}
+
+func (cvt *Converter) checkPerfdata(servicename string) ([]string, error) {
+	if cvt.oitc != nil {
+		log.Printf("check for perfdata in db")
+		perfStr, err := cvt.oitc.FetchPerfdata(servicename)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("perfdata in db %s", perfStr)
+		if perfStr != "" {
+			pfdatas, err := perfdata.ParsePerfdata(perfStr)
+			if err != nil {
+				log.Printf("service %s has invalid perfdata in db: %s\n", servicename, err)
+				return nil, nil
+			}
+			result := make([]string, len(pfdatas))
+			for i, pf := range pfdatas {
+				result[i] = pf.Label
+			}
+			return result, nil
+		}
+	}
+	return nil, nil
+}
 
 type convertSource struct {
-	WspName             string
+	Label               string
 	DestinationFilename string
 	TempFilename        string
+	ArchiveFilename     string
 	Whisper             *whisper.Whisper
 }
 
-func ConvertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
-	var perfdatas []*perfdata.Perfdata
+func newConvertSource(label, destdir, tmpdir, archivedir string) (*convertSource, error) {
+	var err error
+	cs := convertSource{
+		Label:               replaceIllegalCharacters(label),
+		TempFilename:        fmt.Sprintf("%s/%s.wsp", tmpdir, label),
+		DestinationFilename: fmt.Sprintf("%s/%s.wsp", destdir, label),
+	}
+	if archivedir == "" {
+		cs.ArchiveFilename = ""
+	} else {
+		cs.ArchiveFilename = fmt.Sprintf("%s/%s.wsp", archivedir, label)
+	}
+	cs.Whisper, err = whisper.Create(cs.TempFilename, whisperRetention, whisper.Average, 0.5)
+	if err != nil {
+		return nil, fmt.Errorf("Could not create whisper file: %s", err)
+	}
 
-	if oitc != nil {
-		// TODO: should be part of rrdpath
-		log.Printf("check for perfdata in db")
-		perfStr, err := oitc.FetchPerfdata(rrdSet.Servicename)
+	return &cs, nil
+}
+
+func (cs *convertSource) merge(lastUpdate int) error {
+	if _, err := os.Stat(cs.DestinationFilename); !os.IsNotExist(err) {
+		oldws, err := whisper.Open(cs.DestinationFilename)
 		if err != nil {
-			return err
+			return fmt.Errorf("Could not open old whisper databaase: %s", err)
 		}
-		log.Printf("got perfdata %s", perfStr)
-		if perfStr != "" {
-			perfdatas, err = perfdata.ParsePerfdata(perfStr)
-			if err != nil {
-				log.Printf("service %s has invalid perfdata in db: %s\n", rrdSet.Servicename, err)
-			} else {
-				if len(perfdatas) != len(rrdSet.Datasources) {
-					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdatas), len(rrdSet.Datasources))
-				}
+		defer oldws.Close()
+		timeSeries, err := oldws.Fetch(lastUpdate, int(time.Now().Unix()))
+		if err != nil {
+			return fmt.Errorf("Could not fetch data from old whisper database: %s", err)
+		}
+		pts := timeSeries.PointPointers()
+		cleanPoints := make([]*whisper.TimeSeriesPoint, 0, len(pts))
+		for _, pt := range pts {
+			if !math.IsNaN(pt.Value) {
+				cleanPoints = append(cleanPoints, pt)
+			}
+		}
+		if err = cs.Whisper.UpdateMany(cleanPoints); err != nil {
+			return fmt.Errorf("could not merge data from old whisper file: %s", err)
+		}
+	}
+	return nil
+}
+
+func (cs *convertSource) archive() error {
+	if _, err := os.Stat(cs.DestinationFilename); !os.IsNotExist(err) {
+		if cs.ArchiveFilename != "" {
+			if err := os.MkdirAll(filepath.Dir(cs.ArchiveFilename), 0755); err != nil {
+				return fmt.Errorf("could not create directory for old whisper file archive: %s", err)
+			}
+			if err := os.Rename(cs.DestinationFilename, cs.ArchiveFilename); err != nil {
+				return fmt.Errorf("could not move old whisper file to archive: %s", err)
 			}
 		}
 	}
+	return nil
+}
 
-	destdir := fmt.Sprintf("%s/%s/%s", dest, rrdSet.Hostname, rrdSet.Servicename)
-
-	dumperHelper, err := NewRrdDumperHelper(context.Background(), rrdSet.RrdPath)
-	if err != nil {
+func (cs *convertSource) mergeAndArchive(lastUpdate int) error {
+	if err := cs.merge(lastUpdate); err != nil {
 		return err
 	}
 
+	if err := cs.archive(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Convert an rrd file to whisper files
+func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
+	dbLabels, err := cvt.checkPerfdata(rrdSet.Servicename)
+	if err != nil {
+		return err
+	}
+	if dbLabels != nil {
+		if len(dbLabels) != len(rrdSet.Datasources) {
+			return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(dbLabels), len(rrdSet.Datasources))
+		}
+		rrdSet.Datasources = dbLabels
+	}
+
+	destdir := fmt.Sprintf("%s/%s/%s", cvt.destination, rrdSet.Hostname, rrdSet.Servicename)
+	archivedir := ""
+	if cvt.archivePath != "" {
+		archivedir = fmt.Sprintf("%s/%s/%s", cvt.archivePath, rrdSet.Hostname, rrdSet.Servicename)
+	}
 	tmpdir, err := ioutil.TempDir("/tmp", "rrd2whisper")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmpdir)
 
-	var logstr strings.Builder
-	pflen := 0
-	if perfdatas != nil {
-		pflen = len(perfdatas)
-	}
-	logstr.WriteString(fmt.Sprintf("%s has %d datasources and %d perfdata values", rrdSet.RrdPath, len(rrdSet.Datasources), pflen))
-	convertSources := make([]convertSource, len(rrdSet.Datasources))
-	for i, ds := range rrdSet.Datasources {
-		rawName := ds
-		if perfdatas != nil {
-			rawName = perfdatas[i].Label
-		}
-		convertSources[i].WspName = replaceIllegalCharacters(rawName)
-		convertSources[i].TempFilename = fmt.Sprintf("%s/%s.wsp", tmpdir, convertSources[i].WspName)
-		convertSources[i].DestinationFilename = fmt.Sprintf("%s/%s.wsp", destdir, convertSources[i].WspName)
-		convertSources[i].Whisper, err = whisper.Create(convertSources[i].TempFilename, whisperRetention, whisper.Average, 0.5)
-		if err != nil {
-			return fmt.Errorf("Could not create whisper file: %s", err)
-		}
-		logstr.WriteString(fmt.Sprintf(" DS%d: `%s`", i, rawName))
-	}
-	logstr.WriteString("\n")
-	log.Print(logstr.String())
-	numSources := len(convertSources)
-	cache := newTimeSeriesCache(numSources, 100000)
-	flushCache := func() error {
-		for i := 0; i < numSources; i++ {
-			err = convertSources[i].Whisper.UpdateMany(cache.rowForSource(i))
-			if err != nil {
-				return fmt.Errorf("Could not update whisper file: %s", err)
-			}
-		}
-		return nil
-	}
-
-	startTime := convertSources[0].Whisper.StartTime()
-	lastTime := startTime
-
-	for row := range dumperHelper.Results() {
-		ts := int(row.Time.Unix())
-		lastTime = ts
-		full := cache.addRow(ts, row.Values)
-		if full {
-			if err = flushCache(); err != nil {
-				return err
-			}
-			cache = newTimeSeriesCache(numSources, 100000)
-		}
-	}
-	if err = flushCache(); err != nil {
+	dumperHelper, err := NewRrdDumperHelper(cvt.ctx, rrdSet.RrdPath)
+	if err != nil {
 		return err
 	}
 
-	for _, cs := range convertSources {
-		if _, err := os.Stat(cs.DestinationFilename); !os.IsNotExist(err) {
-			if mergeExisting {
-				oldws, err := whisper.Open(cs.DestinationFilename)
-				if err != nil {
-					return fmt.Errorf("Could not open old whisper databaase: %s", err)
-				}
-				timeSeries, err := oldws.Fetch(lastTime+60, int(time.Now().Unix()))
-				if err != nil {
-					return fmt.Errorf("Could not fetch data from old whisper database: %s", err)
-				}
-				pts := timeSeries.PointPointers()
-				cleanPoints := make([]*whisper.TimeSeriesPoint, 0, len(pts))
-				for _, pt := range pts {
-					if !math.IsNaN(pt.Value) {
-						cleanPoints = append(cleanPoints, pt)
-					}
-				}
-				if err = cs.Whisper.UpdateMany(cleanPoints); err != nil {
-					return fmt.Errorf("could not merge data from old whisper file: %s", err)
-				}
-				oldws.Close()
-			}
-			if oldWhisperDir != "" {
-				pathArchiveWhisper := fmt.Sprintf("%s/%s/%s", oldWhisperDir, rrdSet.Hostname, rrdSet.Servicename)
-				err = os.MkdirAll(pathArchiveWhisper, 0755)
-				if err != nil {
-					// TODO: not break
-					return fmt.Errorf("Could not create path for old whisper file archive: %s", err)
-				}
-				os.Rename(cs.DestinationFilename, fmt.Sprintf("%s/%s.wsp", pathArchiveWhisper, cs.WspName))
-			}
+	sources := make([]*convertSource, len(rrdSet.Datasources))
+	for i, label := range rrdSet.Datasources {
+		sources[i], err = newConvertSource(label, destdir, tmpdir, archivedir)
+		if err != nil {
+			return err
 		}
 	}
+	lastUpdate := sources[0].Whisper.StartTime()
 
-	for _, cs := range convertSources {
-		err = cs.Whisper.Close()
-		if err != nil {
-			return fmt.Errorf("Could not write whisper file: %s", err)
+	cache := newTimeSeriesCache(sources, 100000)
+	for row := range dumperHelper.Results() {
+		ts := int(row.Time.Unix())
+		lastUpdate = ts
+		if err := cache.addRow(ts, row.Values); err != nil {
+			return err
+		}
+	}
+	cache.close()
+
+	// Check if canceld while dumping
+	select {
+	case <-cvt.ctx.Done():
+		return cvt.ctx.Err()
+	default:
+	}
+
+	if cvt.merge {
+		for _, source := range sources {
+			source.mergeAndArchive(lastUpdate)
+		}
+	} else if cvt.archivePath != "" {
+		for _, source := range sources {
+			source.archive()
 		}
 	}
 
 	if err = os.MkdirAll(destdir, 0755); err != nil {
-		return fmt.Errorf("Could not create destination directory: %s", err)
+		return fmt.Errorf("could not create destination directory: %s", err)
 	}
 
-	for _, cs := range convertSources {
+	for _, cs := range sources {
 		if err = os.Rename(cs.TempFilename, cs.DestinationFilename); err != nil {
-			return fmt.Errorf("Could not move wsp file to destination directory: %s", err)
+			return fmt.Errorf("could not move wsp file to destination directory: %s", err)
 		}
 	}
 
