@@ -61,12 +61,13 @@ func (dc *dataCache) rowForSource(source int) []*whisper.TimeSeriesPoint {
 	return dc.values[startPos:endPos]
 }
 
-func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
+func convertRrd(rrdSet *rrdpath.RrdSet, dest, oldWhisperDir string, mergeExisting bool, oitc *oitcdb.OITC) error {
 	var perfdatas []*perfdata.Perfdata
 
 	if oitc != nil {
+		// TODO: should be part of rrdpath
 		log.Printf("check for perfdata in db")
-		perfStr, err := oitc.FetchPerfdata(xml.Servicename)
+		perfStr, err := oitc.FetchPerfdata(rrdSet.Servicename)
 		if err != nil {
 			return err
 		}
@@ -74,21 +75,21 @@ func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExistin
 		if perfStr != "" {
 			perfdatas, err = perfdata.ParsePerfdata(perfStr)
 			if err != nil {
-				log.Printf("service %s has invalid perfdata in db: %s\n", xml.Servicename, err)
+				log.Printf("service %s has invalid perfdata in db: %s\n", rrdSet.Servicename, err)
 			} else {
-				if len(perfdatas) != len(xml.Datasources) {
-					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdatas), len(xml.Datasources))
+				if len(perfdatas) != len(rrdSet.Datasources) {
+					return fmt.Errorf("invalid number of perfdata values db %d != xml %d", len(perfdatas), len(rrdSet.Datasources))
 				}
 			}
 		}
 	}
 
-	dumper, err := rrd.NewDumper(xml.RrdPath, "AVERAGE")
+	dumper, err := rrd.NewDumper(rrdSet.RrdPath, "AVERAGE")
 	if err != nil {
 		return fmt.Errorf("could not dump rrd file: %s", err)
 	}
 
-	destdir := fmt.Sprintf("%s/%s/%s", dest, xml.Hostname, xml.Servicename)
+	destdir := fmt.Sprintf("%s/%s/%s", dest, rrdSet.Hostname, rrdSet.Servicename)
 
 	tmpdir, err := ioutil.TempDir("/tmp", "rrd2whisper")
 	if err != nil {
@@ -101,10 +102,10 @@ func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExistin
 	if perfdatas != nil {
 		pflen = len(perfdatas)
 	}
-	logstr.WriteString(fmt.Sprintf("%s has %d datasources and %d perfdata values", xml.RrdPath, len(xml.Datasources), pflen))
-	convertSources := make([]convertSource, len(xml.Datasources))
-	for i, ds := range xml.Datasources {
-		rawName := ds.Name
+	logstr.WriteString(fmt.Sprintf("%s has %d datasources and %d perfdata values", rrdSet.RrdPath, len(rrdSet.Datasources), pflen))
+	convertSources := make([]convertSource, len(rrdSet.Datasources))
+	for i, ds := range rrdSet.Datasources {
+		rawName := ds
 		if perfdatas != nil {
 			rawName = perfdatas[i].Label
 		}
@@ -182,7 +183,7 @@ func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExistin
 				oldws.Close()
 			}
 			if oldWhisperDir != "" {
-				pathArchiveWhisper := fmt.Sprintf("%s/%s/%s", oldWhisperDir, xml.Hostname, xml.Servicename)
+				pathArchiveWhisper := fmt.Sprintf("%s/%s/%s", oldWhisperDir, rrdSet.Hostname, rrdSet.Servicename)
 				err = os.MkdirAll(pathArchiveWhisper, 0755)
 				if err != nil {
 					// TODO: not break
@@ -210,11 +211,9 @@ func convertRrd(xml *rrdpath.XMLNagios, dest, oldWhisperDir string, mergeExistin
 		}
 	}
 
-	okFl, err := os.OpenFile(xml.OkPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("Could not create %s file: %s", xml.OkPath, err)
+	if err = rrdSet.Done(); err != nil {
+		return err
 	}
-	okFl.Close()
 
 	return nil
 }

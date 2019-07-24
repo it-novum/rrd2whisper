@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"context"
 	"github.com/it-novum/rrd2whisper/oitcdb"
@@ -126,26 +127,36 @@ func main() {
 
 
 	logAndPrintf("Search %s for xml perfdata files\n", cli.sourceDirectory)
-	workdata := gatherWorkdata(cli)
-	logAndPrintf("Found: %d Todo: %d After Limit: %d Too Old: %d Corrupt: %d\n", workdata.foundTotal, workdata.foundTodo, workdata.finalTodo, workdata.tooOld, workdata.corrupt)
-	if workdata.brokenXMLCount > 0 {
-		logAndPrintf("Found %d broken xml files\n", workdata.brokenXMLCount)
+	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
+	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(context.Background(), cli.sourceDirectory), oldest, cli.limit)
+	if err != nil {
+		logAndFatalf("Could not scan rrd path: %s", err)
 	}
+	
+	logAndPrintf(
+		"Total: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
+		workdata.Total,
+		workdata.Todo,
+		len(workdata.RrdSets),
+		workdata.TooOld,
+		workdata.Corrupt,
+		workdata.BrokenXML)
 	if cli.checkOnly {
 		return
 	}
 
 	pb := mpb.New()
 	bar := pb.AddBar(
-		int64(workdata.finalTodo),
+		int64(len(workdata.RrdSets)),
 		mpb.PrependDecorators(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth)),
 		mpb.AppendDecorators(decor.Percentage()),
 	)
 
 	var wg sync.WaitGroup
 
-	jobs := make(chan *rrdpath.XMLNagios, cli.workers+1)
+	jobs := make(chan *rrdpath.RrdSet, cli.workers+1)
 
+	logAndPrintf("Start converting rrd files")
 	for i := 0; i < cli.workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -163,8 +174,8 @@ func main() {
 	}
 	wg.Add(1)
 	go func() {
-		for _, xmlFile := range workdata.xmlFiles {
-			jobs <- xmlFile
+		for _, rrdSet := range workdata.RrdSets {
+			jobs <- rrdSet
 		}
 		close(jobs)
 		wg.Done()

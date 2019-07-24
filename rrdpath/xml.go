@@ -25,8 +25,7 @@ type XMLNagios struct {
 	RrdTxt      string `xml:"RRD>TXT"`
 	TimeT       int64  `xml:"NAGIOS_TIMET"`
 	Datasources []XMLDatasource `xml:"DATASOURCE"`
-	RrdPath string
-	OkPath string
+	Path string
 }
 
 func parseRrdXML(path string) (*XMLNagios, error) {
@@ -37,11 +36,10 @@ func parseRrdXML(path string) (*XMLNagios, error) {
 	xmlstruct := new(XMLNagios)
 	err = xml.Unmarshal(xmldata, xmlstruct)
 	if err != nil {
-		return nil, fmt.Errorf("Could not parse xml structure: %s", err)
+		return nil, err
 	}
 
-	xmlstruct.RrdPath = path[:len(path)-4] + ".rrd"
-	xmlstruct.OkPath = path[:len(path)-4] + ".ok"
+	xmlstruct.Path = path
 
 	return xmlstruct, nil
 }
