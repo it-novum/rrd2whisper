@@ -1,9 +1,9 @@
 package rrdpath
 
 import (
+	"github.com/it-novum/rrd2whisper/logging"
 	"sync/atomic"
 	"context"
-	"log"
 	"encoding/xml"
 	"fmt"
 	"io/ioutil"
@@ -85,7 +85,7 @@ func Walk(ctx context.Context, path string) *RrdPath {
 				xmlNagios, err = parseRrdXML(path)
 				if err != nil {
 					atomic.AddUint64(&rrdPath.brokenXMLCount, 1)
-					log.Printf("Could not read xml file: %s", err)
+					logging.Log("Could not read xml file: %s", err)
 				}
 			}
 			if xmlNagios != nil {

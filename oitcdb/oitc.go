@@ -1,10 +1,10 @@
 package oitcdb
 
 import (
+	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql" // ensure mysql driver is loaded
-	"log"
 	"time"
 )
 
@@ -78,7 +78,7 @@ func (oitc *OITC) FetchPerfdata(servicename string) (string, error) {
 		res, err = oitc.queryPerfdata(servicename)
 		if err != nil {
 			time.Sleep(time.Second)
-			log.Printf("lost connection to mysql server -> retry\n")
+			logging.Log("lost connection to mysql server -> retry\n")
 		} else {
 			return res, err
 		}

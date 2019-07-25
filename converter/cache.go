@@ -50,12 +50,14 @@ func (tsc *timeSeriesCache) rowForSource(source int) []*whisper.TimeSeriesPoint 
 }
 
 func (tsc *timeSeriesCache) flush() error {
-	for i, source := range tsc.sources {
-		if err := source.Whisper.UpdateMany(tsc.rowForSource(i)); err != nil {
-			return fmt.Errorf("could not update whisper file: %s", err)
+	if tsc.positions[0] != 0 {
+		for i, source := range tsc.sources {
+			if err := source.Whisper.UpdateMany(tsc.rowForSource(i)); err != nil {
+				return fmt.Errorf("could not update whisper file: %s", err)
+			}
 		}
+		tsc.reset()
 	}
-	tsc.reset()
 	return nil
 }
 

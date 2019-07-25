@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"flag"
 	"fmt"
@@ -90,29 +91,19 @@ func parseCli() (*commandLine, error) {
 	return cli, nil
 }
 
-func logAndPrintf(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
-	log.Printf(format, v...)
-}
-
-func logAndFatalf(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
-	log.Fatalf(format, v...)
-}
-
 func main() {
 	cli, err := parseCli()
 	if err != nil {
-		log.Fatalln(err)
+		logging.LogFatal("%s\n", err)
 	}
 
 	if err = converter.SetRetention(cli.retention); err != nil {
-		log.Fatalln(err)
+		logging.LogFatal("%s\n", err)
 	}
 
 	lf, err := os.OpenFile(cli.logfile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Could not open log file: %s", err)
+		logging.LogFatal("Could not open log file: %s\n", err)
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
@@ -123,20 +114,20 @@ func main() {
 	if !cli.nosql {
 		oitc, err = oitcdb.NewOITC(ctx, cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
 		if err != nil {
-			logAndFatalf("could not connect to mysql: %s\n", err)
+			logging.LogFatal("could not connect to mysql: %s\n", err)
 		}
 		defer oitc.Close()
 	}
 
 	// TODO: age zero == all
-	logAndPrintf("Scanning %s for xml perfdata files\n", cli.sourceDirectory)
+	logging.LogDisplay("Scanning %s for xml perfdata files\n", cli.sourceDirectory)
 	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
 	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(ctx, cli.sourceDirectory), oldest, cli.limit)
 	if err != nil {
-		logAndFatalf("Could not scan rrd path: %s", err)
+		logging.LogFatal("Could not scan rrd path: %s\n", err)
 	}
 
-	logAndPrintf(
+	logging.LogDisplay(
 		"Scanning finished\nTotal: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
 		workdata.Total,
 		workdata.Todo,

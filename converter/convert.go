@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
@@ -8,7 +9,6 @@ import (
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/jabdr/nagios-perfdata"
 	"io/ioutil"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -61,9 +61,10 @@ func (cvt *Converter) checkPerfdata(servicename string) ([]string, error) {
 			return nil, err
 		}
 		if perfStr != "" {
+			logging.Log("service perfdata in db \"%s\" -> \"%s\"\n", servicename, perfStr)
 			pfdatas, err := perfdata.ParsePerfdata(perfStr)
 			if err != nil {
-				log.Printf("service %s has invalid perfdata in db: %s\n", servicename, err)
+				logging.Log("service %s has invalid perfdata in db: %s\n", servicename, err)
 				return nil, nil
 			}
 			result := make([]string, len(pfdatas))
@@ -99,7 +100,7 @@ func newConvertSource(label, destdir, tmpdir, archivedir string) (*convertSource
 	}
 	cs.Whisper, err = whisper.Create(cs.TempFilename, whisperRetention, whisper.Average, 0.5)
 	if err != nil {
-		return nil, fmt.Errorf("Could not create whisper file: %s", err)
+		return nil, fmt.Errorf("could not create whisper file: %s", err)
 	}
 
 	return &cs, nil
@@ -107,6 +108,7 @@ func newConvertSource(label, destdir, tmpdir, archivedir string) (*convertSource
 
 func (cs *convertSource) merge(lastUpdate int) error {
 	if _, err := os.Stat(cs.DestinationFilename); !os.IsNotExist(err) {
+		logging.Log("Merge whisper file \"%s\" with \"%s\"\n", cs.TempFilename, cs.DestinationFilename)
 		oldws, err := whisper.Open(cs.DestinationFilename)
 		if err != nil {
 			return fmt.Errorf("Could not open old whisper databaase: %s", err)
@@ -126,6 +128,7 @@ func (cs *convertSource) merge(lastUpdate int) error {
 		if err = cs.Whisper.UpdateMany(cleanPoints); err != nil {
 			return fmt.Errorf("could not merge data from old whisper file: %s", err)
 		}
+		logging.Log("Successfully merged \"%s\"\n", cs.TempFilename)
 	}
 	return nil
 }
@@ -133,6 +136,7 @@ func (cs *convertSource) merge(lastUpdate int) error {
 func (cs *convertSource) archive() error {
 	if _, err := os.Stat(cs.DestinationFilename); !os.IsNotExist(err) {
 		if cs.ArchiveFilename != "" {
+			logging.Log("Move old whisper to archive \"%s\" -> \"%s\"\n", cs.DestinationFilename, cs.ArchiveFilename)
 			if err := os.MkdirAll(filepath.Dir(cs.ArchiveFilename), 0755); err != nil {
 				return fmt.Errorf("could not create directory for old whisper file archive: %s", err)
 			}
@@ -202,7 +206,9 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 			return err
 		}
 	}
-	cache.close()
+	if err := cache.flush(); err != nil {
+		return err
+	}
 
 	// Check if canceld while dumping
 	select {
@@ -219,6 +225,10 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 		for _, source := range sources {
 			source.archive()
 		}
+	}
+
+	if err := cache.close(); err != nil {
+		return err
 	}
 
 	if err = os.MkdirAll(destdir, 0755); err != nil {

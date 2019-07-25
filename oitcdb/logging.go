@@ -1,14 +1,14 @@
 package oitcdb
 
 import (
-	"log"
+	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/go-sql-driver/mysql"
 )
 
 type mysqlLogger struct {}
 
 func (lg *mysqlLogger) Print(v ...interface{}) {
-	log.Print(v...)
+	logging.LogDisplayV(v...)
 }
 
 func init() {

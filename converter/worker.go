@@ -1,11 +1,10 @@
 package converter
 
 import (
+	"github.com/it-novum/rrd2whisper/logging"
 	"sync"
 	"context"
 	"github.com/vbauerster/mpb/v4"
-	"log"
-
 	"github.com/it-novum/rrd2whisper/rrdpath"
 )
 
@@ -52,9 +51,9 @@ func (w *Worker) work() {
 				return
 			}
 			if err := w.cvt.Convert(job); err != nil {
-				log.Printf("error: Could not convert rrd file %s: %s", job.RrdPath, err)
+				logging.Log("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 			} else {
-				log.Printf("successfully converted %s to whisper", job.RrdPath)
+				logging.Log("successfully converted %s to whisper", job.RrdPath)
 			}
 			w.bar.Increment()
 		}
