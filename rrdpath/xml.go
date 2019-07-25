@@ -20,8 +20,6 @@ type XMLDatasource struct {
 // XMLNagios is holding the structure of the rrd xml file
 type XMLNagios struct {
 	XMLName     string `xml:"NAGIOS"`
-	Hostname    string `xml:"NAGIOS_HOSTNAME"`
-	Servicename string `xml:"NAGIOS_SERVICEDESC"`
 	RrdTxt      string `xml:"RRD>TXT"`
 	TimeT       int64  `xml:"NAGIOS_TIMET"`
 	Datasources []XMLDatasource `xml:"DATASOURCE"`

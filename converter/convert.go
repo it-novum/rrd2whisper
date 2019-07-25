@@ -86,15 +86,16 @@ type convertSource struct {
 
 func newConvertSource(label, destdir, tmpdir, archivedir string) (*convertSource, error) {
 	var err error
+	newLabel := replaceIllegalCharacters(label)
 	cs := convertSource{
-		Label:               replaceIllegalCharacters(label),
-		TempFilename:        fmt.Sprintf("%s/%s.wsp", tmpdir, label),
-		DestinationFilename: fmt.Sprintf("%s/%s.wsp", destdir, label),
+		Label:               newLabel,
+		TempFilename:        fmt.Sprintf("%s/%s.wsp", tmpdir, newLabel),
+		DestinationFilename: fmt.Sprintf("%s/%s.wsp", destdir, newLabel),
 	}
 	if archivedir == "" {
 		cs.ArchiveFilename = ""
 	} else {
-		cs.ArchiveFilename = fmt.Sprintf("%s/%s.wsp", archivedir, label)
+		cs.ArchiveFilename = fmt.Sprintf("%s/%s.wsp", archivedir, newLabel)
 	}
 	cs.Whisper, err = whisper.Create(cs.TempFilename, whisperRetention, whisper.Average, 0.5)
 	if err != nil {

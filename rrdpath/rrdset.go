@@ -1,6 +1,7 @@
 package rrdpath
 
 import (
+	"path/filepath"
 	"fmt"
 	"os"
 	"time"
@@ -23,11 +24,13 @@ func NewRrdSet(xml *XMLNagios) *RrdSet {
 	for i, c := range xml.Datasources {
 		ds[i] = c.Name
 	}
+	hostDir := filepath.Dir(xml.Path)
+	serviceFile := filepath.Base(xml.Path)
 	return &RrdSet{
 		okPath: xml.Path[:len(xml.Path)-4] + ".ok",
 		RrdPath: xml.Path[:len(xml.Path)-4] + ".rrd",
-		Hostname: xml.Hostname,
-		Servicename: xml.Servicename,
+		Hostname: filepath.Base(hostDir),
+		Servicename: serviceFile[:len(serviceFile)-4],
 		Time: time.Unix(xml.TimeT, 0),
 		Datasources: ds,
 		Updated: xml.RrdTxt == "successful updated",
