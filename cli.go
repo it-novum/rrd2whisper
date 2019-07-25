@@ -1,11 +1,11 @@
 package main
 
 import (
-	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"flag"
 	"fmt"
 	"github.com/it-novum/rrd2whisper/converter"
+	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/vbauerster/mpb/v4"
@@ -18,30 +18,32 @@ import (
 )
 
 type commandLine struct {
-	sourceDirectory string
-	repDirectory    string
-	destDirectory   string
-	includeCorrupt  bool
-	maxAge          int64
-	limit           int
-	parallel        int
-	retention       string
-	checkOnly       bool
-	noMerge         bool
-	mysqlDSN        string
-	mysqlINI        string
-	mysqlRetry      int
-	logfile         string
-	nosql           bool
+	sourceDirectory  string
+	archiveDirectory string
+	destDirectory    string
+	tempDirectory    string
+	includeCorrupt   bool
+	maxAge           int64
+	limit            int
+	parallel         int
+	retention        string
+	checkOnly        bool
+	noMerge          bool
+	mysqlDSN         string
+	mysqlINI         string
+	mysqlRetry       int
+	logfile          string
+	nosql            bool
 }
 
 func parseCli() (*commandLine, error) {
 	var err error
 
 	cli := new(commandLine)
-	flag.StringVar(&cli.sourceDirectory, "source", "", "Path to source directory file tree of rrd files")
-	flag.StringVar(&cli.destDirectory, "dest", "", "Destination of file tree for whisper")
-	flag.StringVar(&cli.repDirectory, "rep", "", "Path where replaced whisper files are stored")
+	flag.StringVar(&cli.sourceDirectory, "source", "/var/lib/graphite/whisper/openitcockpit", "Path to source directory file tree of rrd files")
+	flag.StringVar(&cli.destDirectory, "destination", "/opt/openitc/nagios/share/perfdata", "Destination of file tree for whisper")
+	flag.StringVar(&cli.archiveDirectory, "archive", "/var/backups/old-whisper-files", "Path where replaced whisper files are stored")
+	flag.StringVar(&cli.tempDirectory, "tmp-dir", "/tmp", "Alternative path to store temporary files")
 	flag.BoolVar(&cli.includeCorrupt, "include-corrupt", false, "Include rrd files that could not be updated")
 	flag.Int64Var(&cli.maxAge, "max-age", 1209600, "Maximum age of an rrd file to be included (in seconds since last update, default 2 weeks, 0=all)")
 	flag.IntVar(&cli.limit, "limit", 0, "Limit number of rrd's in one step, 0=unlimited")
@@ -81,7 +83,7 @@ func parseCli() (*commandLine, error) {
 		if cli.destDirectory == "" {
 			return cli, fmt.Errorf("need -dest for whisper files output")
 		}
-		if cli.repDirectory == "" {
+		if cli.archiveDirectory == "" {
 			if _, err = os.Stat(cli.destDirectory); !os.IsNotExist(err) {
 				return cli, fmt.Errorf("if the destination directory already exists, you MUST specify a -rep directory")
 			}
@@ -146,7 +148,7 @@ func main() {
 		mpb.AppendDecorators(decor.Percentage()),
 	)
 
-	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.repDirectory, !cli.noMerge, oitc)
+	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
 	worker := converter.NewWorker(ctx, workdata.RrdSets, cli.parallel, cvt, bar)
 	worker.WaitGroup.Wait()
 }

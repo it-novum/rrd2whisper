@@ -1,10 +1,10 @@
 package converter
 
 import (
-	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"fmt"
 	"github.com/go-graphite/go-whisper"
+	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/jabdr/nagios-perfdata"
@@ -39,16 +39,18 @@ type Converter struct {
 	merge       bool
 	destination string
 	archivePath string
+	tempPath    string
 	oitc        *oitcdb.OITC
 	ctx         context.Context
 }
 
 // NewConverter is the constructor for Converter
-func NewConverter(ctx context.Context, destination string, archivePath string, merge bool, oitc *oitcdb.OITC) *Converter {
+func NewConverter(ctx context.Context, destination, archivePath, tempPath string, merge bool, oitc *oitcdb.OITC) *Converter {
 	return &Converter{
 		merge:       merge,
 		destination: destination,
 		archivePath: archivePath,
+		tempPath:    tempPath,
 		oitc:        oitc,
 		ctx:         ctx,
 	}
@@ -178,7 +180,7 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 	if cvt.archivePath != "" {
 		archivedir = fmt.Sprintf("%s/%s/%s", cvt.archivePath, rrdSet.Hostname, rrdSet.Servicename)
 	}
-	tmpdir, err := ioutil.TempDir("/tmp", "rrd2whisper")
+	tmpdir, err := ioutil.TempDir(cvt.tempPath, "rrd2whisper")
 	if err != nil {
 		return err
 	}
