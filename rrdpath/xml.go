@@ -29,7 +29,7 @@ type XMLNagios struct {
 func parseRrdXML(path string) (*XMLNagios, error) {
 	xmldata, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("Could not read xml file: %s", err)
+		return nil, fmt.Errorf("could not read xml file: %s", err)
 	}
 	xmlstruct := new(XMLNagios)
 	err = xml.Unmarshal(xmldata, xmlstruct)
