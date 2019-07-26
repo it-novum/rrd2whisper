@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jabdr/rrd"
+	"math"
 )
 
 // RrdDumperHelper wrapps arround rrd.RrdDumper to provide a cancable worker
@@ -25,21 +26,39 @@ func NewRrdDumperHelper(ctx context.Context, path string) (*RrdDumperHelper, err
 		return nil, fmt.Errorf("could not open rrd file: %s", err)
 	}
 
-	go func(rdh *RrdDumperHelper) {
-		done := rdh.ctx.Done()
-		for row := rdh.dumper.Next(); row != nil; row = rdh.dumper.Next() {
+	go rdh.work()
+
+	return rdh, nil
+}
+
+func (rdh *RrdDumperHelper) work() {
+	done := rdh.ctx.Done()
+	for row := rdh.dumper.Next(); row != nil; row = rdh.dumper.Next() {
+		hasVal := false
+		for _, val := range row.Values {
+			if !math.IsNaN(val) {
+				hasVal = true
+				break
+			}
+		}
+		if hasVal {
 			select {
 			case <-done:
 				close(rdh.results)
 				return
 			case rdh.results <- row:
 			}
+		} else {
+			select {
+			case <-done:
+				close(rdh.results)
+				return
+			default:
+			}
 		}
-		close(rdh.results)
-		rdh.dumper.Free()
-	}(rdh)
-
-	return rdh, nil
+	}
+	close(rdh.results)
+	rdh.dumper.Free()
 }
 
 // Results returns a channel with the rows of the rrd file

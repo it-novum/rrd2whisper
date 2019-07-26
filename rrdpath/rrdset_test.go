@@ -2,13 +2,11 @@ package rrdpath
 
 import (
 	"context"
-	"time"
-	"github.com/jabdr/nagios-perfdata"
 	"github.com/it-novum/rrd2whisper/testsuite"
+	"github.com/jabdr/nagios-perfdata"
 	"testing"
+	"time"
 )
-
-const day = time.Duration(5*24*60*60*60)*time.Second
 
 func Test(t *testing.T) {
 	ts := testsuite.Prepare()
@@ -17,7 +15,7 @@ func Test(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-day).Add(-day*2), time.Now().Add(-day*2), false)
+	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-testsuite.DAY).Add(-testsuite.DAY*2), time.Now().Add(-testsuite.DAY*2), false)
 
 	rrdPath := Walk(context.Background(), ts.Source)
 	var maxAge time.Time
@@ -45,7 +43,7 @@ func TestBrokenXML(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-day).Add(-day*2), time.Now().Add(-day*2), true)
+	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-testsuite.DAY).Add(-testsuite.DAY*2), time.Now().Add(-testsuite.DAY*2), true)
 
 	rrdPath := Walk(context.Background(), ts.Source)
 	var maxAge time.Time
@@ -58,7 +56,6 @@ func TestBrokenXML(t *testing.T) {
 	}
 }
 
-
 func TestCancel(t *testing.T) {
 	ts := testsuite.Prepare()
 	defer ts.Shutdown()
@@ -66,7 +63,7 @@ func TestCancel(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-day).Add(-day*2), time.Now().Add(-day*2), false)
+	testsuite.CreateRrd(ts.Source, "abc", "abc", pf, time.Now().Add(-testsuite.DAY).Add(-testsuite.DAY*2), time.Now().Add(-testsuite.DAY*2), false)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	rrdPath := Walk(ctx, ts.Source)

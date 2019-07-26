@@ -93,6 +93,15 @@ func parseCli() (*commandLine, error) {
 	return cli, nil
 }
 
+type barIncrementor struct {
+	bar *mpb.Bar
+}
+
+func (bi *barIncrementor) Visit(_ *rrdpath.RrdSet, _ error) {
+	bi.bar.Increment()
+}
+
+
 func main() {
 	cli, err := parseCli()
 	if err != nil {
@@ -149,6 +158,6 @@ func main() {
 	)
 
 	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
-	worker := converter.NewWorker(ctx, workdata.RrdSets, cli.parallel, cvt, bar)
+	worker := converter.NewWorker(ctx, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
 	worker.WaitGroup.Wait()
 }

@@ -1,30 +1,35 @@
 package converter
 
 import (
-	"github.com/it-novum/rrd2whisper/logging"
-	"sync"
 	"context"
-	"github.com/vbauerster/mpb/v4"
+	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/rrdpath"
+	"sync"
 )
+
+// RrdSetVisitor is called by the worker after a conversion
+type RrdSetVisitor interface {
+	// error will be set if there was an error converting the rrd
+	Visit(*rrdpath.RrdSet, error)
+}
 
 // Worker helps to process a list of rrd files to whisper
 type Worker struct {
-	cvt  *Converter
-	bar  *mpb.Bar
-	jobs chan *rrdpath.RrdSet
-	ctx context.Context
-	rrdSets []*rrdpath.RrdSet
+	cvt       *Converter
+	visitor   RrdSetVisitor
+	jobs      chan *rrdpath.RrdSet
+	ctx       context.Context
+	rrdSets   []*rrdpath.RrdSet
 	WaitGroup sync.WaitGroup
 }
 
 // NewWorker starts processing the rrd files
-func NewWorker(ctx context.Context, rrdSets []*rrdpath.RrdSet, parallel int, cvt *Converter, bar *mpb.Bar) *Worker {
+func NewWorker(ctx context.Context, rrdSets []*rrdpath.RrdSet, parallel int, cvt *Converter, visitor RrdSetVisitor) *Worker {
 	w := Worker{
-		ctx: ctx,
-		cvt: cvt,
-		bar: bar,
-		jobs: make(chan *rrdpath.RrdSet, parallel+1),
+		ctx:     ctx,
+		cvt:     cvt,
+		visitor: visitor,
+		jobs:    make(chan *rrdpath.RrdSet, parallel+1),
 		rrdSets: rrdSets,
 	}
 
@@ -50,12 +55,13 @@ func (w *Worker) work() {
 			if !ok {
 				return
 			}
-			if err := w.cvt.Convert(job); err != nil {
+			err := w.cvt.Convert(job)
+			if err != nil {
 				logging.Log("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 			} else {
 				logging.Log("successfully converted %s to whisper", job.RrdPath)
 			}
-			w.bar.Increment()
+			w.visitor.Visit(job, err)
 		}
 	}
 }

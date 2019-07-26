@@ -1,20 +1,22 @@
 package testsuite
 
 import (
-	"text/template"
-	"strings"
-	"strconv"
-	"math/rand"
 	"fmt"
 	"github.com/jabdr/nagios-perfdata"
 	"github.com/jabdr/rrd"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
+	"text/template"
 	"time"
 )
+
+const DAY = time.Duration(24*60*60) * time.Second
 
 var illegalCharactersRegexp = regexp.MustCompile(`[^a-zA-Z^0-9\\-\\.]`)
 
@@ -23,20 +25,21 @@ func replaceIllegalCharacters(s string) string {
 }
 
 type TestSuite struct {
-	baseDir string
-	Source  string
-	Archive string
-	Temp    string
+	baseDir     string
+	Source      string
+	Destination string
+	Archive     string
+	Temp        string
 }
 
 type xmlData struct {
 	perfdata.Perfdata
-	RrdPath string
-	XMLPath string
-	LastUpdate int64
-	Hostname string
+	RrdPath     string
+	XMLPath     string
+	LastUpdate  int64
+	Hostname    string
 	Servicename string
-	Number int
+	Number      int
 }
 
 func writeRrdXML(xmlpath, rrdpath, hostname, servicename string, pflist []*perfdata.Perfdata, lastUpdate int64, broken bool) {
@@ -94,27 +97,27 @@ func writeRrdXML(xmlpath, rrdpath, hostname, servicename string, pflist []*perfd
 
 	var xmlOut strings.Builder
 	xmlOut.WriteString(xmlBegin)
-	
+
 	for i, pf := range pflist {
 		inData := xmlData{
-			Perfdata: *pf,
-			RrdPath: rrdpath,
-			XMLPath: xmlpath,
-			Hostname: hostname,
+			Perfdata:    *pf,
+			RrdPath:     rrdpath,
+			XMLPath:     xmlpath,
+			Hostname:    hostname,
 			Servicename: servicename,
-			LastUpdate: lastUpdate,
-			Number: i,
+			LastUpdate:  lastUpdate,
+			Number:      i,
 		}
 		xmlDS.Execute(&xmlOut, inData)
 	}
 	inData := xmlData{
-		Perfdata: *pflist[len(pflist)-1],
-		RrdPath: rrdpath,
-		XMLPath: xmlpath,
-		Hostname: hostname,
+		Perfdata:    *pflist[len(pflist)-1],
+		RrdPath:     rrdpath,
+		XMLPath:     xmlpath,
+		Hostname:    hostname,
 		Servicename: servicename,
-		LastUpdate: lastUpdate,
-		Number: 0,
+		LastUpdate:  lastUpdate,
+		Number:      0,
 	}
 	xmlend.Execute(&xmlOut, inData)
 
@@ -140,12 +143,11 @@ func generateRandomTimeSeriesRrd(unixFrom, unixTo int64, pflist []*perfdata.Perf
 		}
 	}
 
-	
 	for i := int64(1); i < minutes; i++ {
 		row := make([]string, len(pflist)+1)
-		row[0] = strconv.FormatInt(unixFrom + (i * 60), 10)
+		row[0] = strconv.FormatInt(unixFrom+(i*60), 10)
 		for c, pf := range pflist {
-			row [c+1] = strconv.FormatFloat(((pf.Max-pf.Min) * rand.Float64() + pf.Min), 'f', 2, 64)
+			row[c+1] = strconv.FormatFloat(((pf.Max-pf.Min)*rand.Float64() + pf.Min), 'f', 2, 64)
 		}
 		values[i-1] = row
 	}
@@ -153,7 +155,13 @@ func generateRandomTimeSeriesRrd(unixFrom, unixTo int64, pflist []*perfdata.Perf
 	return values
 }
 
-func CreateRrd(path string, hostname string, servicename string, pflist []*perfdata.Perfdata, from time.Time, to time.Time, brokenXML bool) {
+type RrdTestData struct {
+	Path       string
+	XMLFile    string
+	TimeSeries [][]string
+}
+
+func CreateRrd(path string, hostname string, servicename string, pflist []*perfdata.Perfdata, from time.Time, to time.Time, brokenXML bool) *RrdTestData {
 	var (
 		rrdPath = fmt.Sprintf("%s/%s/%s.rrd", path, hostname, servicename)
 		xmlPath = fmt.Sprintf("%s/%s/%s.xml", path, hostname, servicename)
@@ -202,6 +210,12 @@ func CreateRrd(path string, hostname string, servicename string, pflist []*perfd
 	}
 
 	writeRrdXML(xmlPath, rrdPath, hostname, servicename, pflist, to.Unix(), brokenXML)
+
+	return &RrdTestData{
+		Path:       rrdPath,
+		XMLFile:    xmlPath,
+		TimeSeries: perfValues,
+	}
 }
 
 func Prepare() *TestSuite {
@@ -210,12 +224,22 @@ func Prepare() *TestSuite {
 		panic(err)
 	}
 	ts := &TestSuite{
-		baseDir: baseDir,
-		Source:  fmt.Sprintf("%s/%s", baseDir, "source"),
-		Archive: fmt.Sprintf("%s/%s", baseDir, "archive"),
-		Temp:    fmt.Sprintf("%s/%s", baseDir, "temp"),
+		baseDir:     baseDir,
+		Source:      fmt.Sprintf("%s/%s", baseDir, "source"),
+		Archive:     fmt.Sprintf("%s/%s", baseDir, "archive"),
+		Temp:        fmt.Sprintf("%s/%s", baseDir, "temp"),
+		Destination: fmt.Sprintf("%s/%s", baseDir, "dest"),
 	}
 	if err := os.MkdirAll(ts.Source, 0755); err != nil {
+		panic(err)
+	}
+	if err := os.MkdirAll(ts.Archive, 0755); err != nil {
+		panic(err)
+	}
+	if err := os.MkdirAll(ts.Temp, 0755); err != nil {
+		panic(err)
+	}
+	if err := os.MkdirAll(ts.Destination, 0755); err != nil {
 		panic(err)
 	}
 
