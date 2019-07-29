@@ -17,6 +17,11 @@ import (
 	"time"
 )
 
+var (
+	// Version number
+	Version string
+)
+
 type commandLine struct {
 	sourceDirectory  string
 	archiveDirectory string
@@ -34,6 +39,7 @@ type commandLine struct {
 	mysqlRetry       int
 	logfile          string
 	nosql            bool
+	version          bool
 }
 
 func parseCli() (*commandLine, error) {
@@ -56,7 +62,17 @@ func parseCli() (*commandLine, error) {
 	flag.StringVar(&cli.mysqlINI, "mysql-ini", "/etc/openitcockpit/mysql.cnf", "path to mysql ini with connection credentials")
 	flag.BoolVar(&cli.nosql, "no-sql", false, "Don't query the database for correct perfdata names")
 	flag.IntVar(&cli.mysqlRetry, "mysql-retry", 30, "retry N times if connection to mysql server is lost with 1s delay")
+	flag.BoolVar(&cli.version, "version", false, "show version and exit")
 	flag.Parse()
+
+	if Version == "" {
+		Version = "dev"
+	}
+
+	if cli.version {
+		fmt.Println("Version: ", Version)
+		os.Exit(0)
+	}
 
 	if cli.parallel <= 0 {
 		cli.parallel = 1
@@ -118,6 +134,8 @@ func main() {
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
+
+	logging.Log("Version: %s", Version)
 
 	ctx := context.Background()
 
