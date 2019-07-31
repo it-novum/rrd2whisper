@@ -149,7 +149,6 @@ func main() {
 		defer oitc.Close()
 	}
 
-	// TODO: age zero == all
 	logging.LogDisplay("Scanning %s for xml perfdata files", cli.sourceDirectory)
 	var oldest time.Time
 	if cli.maxAge > 0 {
