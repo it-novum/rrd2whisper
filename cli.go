@@ -168,7 +168,7 @@ func main() {
 		workdata.TooOld,
 		workdata.Corrupt,
 		workdata.BrokenXML)
-	if cli.checkOnly {
+	if cli.checkOnly || len(workdata.RrdSets) == 0 {
 		return
 	}
 
