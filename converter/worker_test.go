@@ -14,7 +14,7 @@ type testWorkerVisitor struct {
 	counter int
 }
 
-func (twv *testWorkerVisitor) Visit(_ *rrdpath.RrdSet, err error) {
+func (twv *testWorkerVisitor) Visit(_ *rrdpath.RrdSet, _ time.Duration, err error) {
 	twv.counter++
 	if err != nil {
 		twv.errors = append(twv.errors, err)

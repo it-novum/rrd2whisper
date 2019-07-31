@@ -5,30 +5,40 @@ import (
 	"log"
 )
 
+type PrintLogFunc func (message string)
+
+var PrintDisplayLog PrintLogFunc = func(message string) {
+	fmt.Println(message)
+}
+
 func Log(format string, v ...interface{}) {
-	log.Printf(format, v...)
+	log.Println(fmt.Sprintf(format, v...))
 }
 
 func LogV(v ...interface{}) {
-	log.Print(v...)
+	log.Println(fmt.Sprint(v...))
 }
 
 func LogDisplay(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
-	log.Printf(format, v...)
+	msg := fmt.Sprintf(format, v...)
+	PrintDisplayLog(msg)
+	log.Println(msg)
 }
 
 func LogDisplayV(v ...interface{}) {
-	fmt.Print(v...)
-	log.Print(v...)
+	msg := fmt.Sprint(v...)
+	PrintDisplayLog(msg)
+	log.Println(msg)
 }
 
 func LogFatal(format string, v ...interface{}) {
-	fmt.Printf(format, v...)
-	log.Fatalf(format, v...)
+	msg := fmt.Sprintf(format, v...)
+	PrintDisplayLog(msg)
+	log.Fatalln(msg)
 }
 
 func LogFatalV(v ...interface{}) {
-	fmt.Print(v...)
-	log.Fatal(v...)
+	msg := fmt.Sprint(v...)
+	PrintDisplayLog(msg)
+	log.Fatalln(msg)
 }

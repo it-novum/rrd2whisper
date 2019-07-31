@@ -15,7 +15,7 @@ for distribution in bionic xenial trusty stretch buster; do
     # we use build/env to provide an empty context for docker
     docker build -t rrd2whisper_build:$distribution -f dockerfiles/Dockerfile.$distribution build/env
 
-    docker run --rm -t -i -v $(pwd):/build/ -v $(pwd)/build/go:/usr/local/go rrd2whisper_build:$distribution /usr/local/go/bin/go build -ldflags "-X main.Version=1.0.0"
+    docker run --rm -t -i -v $(pwd):/build/ -v $(pwd)/build/go:/usr/local/go rrd2whisper_build:$distribution /usr/local/go/bin/go build -ldflags "-X main.Version=$VERSION"
     upx rrd2whisper
     mv rrd2whisper build/rrd2whisper_${VERSION}_${distribution}_amd64
 done

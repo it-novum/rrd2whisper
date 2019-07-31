@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"time"
 	"context"
 	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/rrdpath"
@@ -10,7 +11,7 @@ import (
 // RrdSetVisitor is called by the worker after a conversion
 type RrdSetVisitor interface {
 	// error will be set if there was an error converting the rrd
-	Visit(*rrdpath.RrdSet, error)
+	Visit(*rrdpath.RrdSet, time.Duration, error)
 }
 
 // Worker helps to process a list of rrd files to whisper
@@ -20,54 +21,55 @@ type Worker struct {
 	jobs      chan *rrdpath.RrdSet
 	ctx       context.Context
 	rrdSets   []*rrdpath.RrdSet
-	WaitGroup sync.WaitGroup
+	wg *sync.WaitGroup
 }
 
 // NewWorker starts processing the rrd files
-func NewWorker(ctx context.Context, rrdSets []*rrdpath.RrdSet, parallel int, cvt *Converter, visitor RrdSetVisitor) *Worker {
+func NewWorker(ctx context.Context, wg *sync.WaitGroup, rrdSets []*rrdpath.RrdSet, parallel int, cvt *Converter, visitor RrdSetVisitor) *Worker {
 	w := Worker{
 		ctx:     ctx,
 		cvt:     cvt,
 		visitor: visitor,
 		jobs:    make(chan *rrdpath.RrdSet, parallel+1),
 		rrdSets: rrdSets,
+		wg: wg,
 	}
 
 	for i := 0; i < parallel; i++ {
-		w.WaitGroup.Add(1)
+		w.wg.Add(1)
 		go w.work()
 	}
 
-	w.WaitGroup.Add(1)
+	w.wg.Add(1)
 	go w.iterate()
 
 	return &w
 }
 
 func (w *Worker) work() {
-	defer w.WaitGroup.Done()
-	done := w.ctx.Done()
+	defer w.wg.Done()
 	for {
 		select {
-		case <-done:
+		case <-w.ctx.Done():
 			return
 		case job, ok := <-w.jobs:
 			if !ok {
 				return
 			}
+			begin := time.Now()
 			err := w.cvt.Convert(job)
 			if err != nil {
-				logging.Log("error: Could not convert rrd file %s: %s", job.RrdPath, err)
+				logging.LogDisplay("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 			} else {
-				logging.Log("successfully converted %s to whisper", job.RrdPath)
+				logging.LogDisplay("successfully converted %s to whisper", job.RrdPath)
 			}
-			w.visitor.Visit(job, err)
+			w.visitor.Visit(job, time.Since(begin), err)
 		}
 	}
 }
 
 func (w *Worker) iterate() {
-	defer w.WaitGroup.Done()
+	defer w.wg.Done()
 	defer close(w.jobs)
 	for _, rrdSet := range w.rrdSets {
 		select {

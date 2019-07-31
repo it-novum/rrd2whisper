@@ -1,6 +1,9 @@
 package main
 
 import (
+	"sync"
+	"os/signal"
+	"io"
 	"context"
 	"flag"
 	"fmt"
@@ -113,51 +116,53 @@ type barIncrementor struct {
 	bar *mpb.Bar
 }
 
-func (bi *barIncrementor) Visit(_ *rrdpath.RrdSet, _ error) {
-	bi.bar.Increment()
+func (bi *barIncrementor) Visit(_ *rrdpath.RrdSet, duration time.Duration, _ error) {
+	bi.bar.Increment(duration)
 }
 
 
 func main() {
 	cli, err := parseCli()
 	if err != nil {
-		logging.LogFatal("%s\n", err)
+		logging.LogFatal("%s", err)
 	}
 
 	if err = converter.SetRetention(cli.retention); err != nil {
-		logging.LogFatal("%s\n", err)
+		logging.LogFatal("%s", err)
 	}
 
 	lf, err := os.OpenFile(cli.logfile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		logging.LogFatal("Could not open log file: %s\n", err)
+		logging.LogFatal("Could not open log file: %s", err)
 	}
 	defer lf.Close()
 	log.SetOutput(lf)
 
 	logging.Log("Version: %s", Version)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	canSig := make(chan os.Signal, 1)
+	signal.Notify(canSig, os.Interrupt, os.Kill)
 
 	var oitc *oitcdb.OITC
 	if !cli.nosql {
 		oitc, err = oitcdb.NewOITC(ctx, cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
 		if err != nil {
-			logging.LogFatal("could not connect to mysql: %s\n", err)
+			logging.LogFatal("could not connect to mysql: %s", err)
 		}
 		defer oitc.Close()
 	}
 
 	// TODO: age zero == all
-	logging.LogDisplay("Scanning %s for xml perfdata files\n", cli.sourceDirectory)
+	logging.LogDisplay("Scanning %s for xml perfdata files", cli.sourceDirectory)
 	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
 	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(ctx, cli.sourceDirectory), oldest, cli.limit)
 	if err != nil {
-		logging.LogFatal("Could not scan rrd path: %s\n", err)
+		logging.LogFatal("Could not scan rrd path: %s", err)
 	}
 
 	logging.LogDisplay(
-		"Scanning finished\nTotal: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d\n",
+		"Scanning finished\nTotal: %d Todo: %d After Limit: %d Too Old: %d Corrupt RRD: %d XML File Broken: %d",
 		workdata.Total,
 		workdata.Todo,
 		len(workdata.RrdSets),
@@ -168,14 +173,36 @@ func main() {
 		return
 	}
 
-	pb := mpb.New()
+	var wg sync.WaitGroup
+
+	pb := mpb.NewWithContext(ctx, mpb.PopCompletedMode(), mpb.WithRefreshRate(1 * time.Second), mpb.WithWaitGroup(&wg))
 	bar := pb.AddBar(
 		int64(len(workdata.RrdSets)),
+		mpb.BarNoPop(),
 		mpb.PrependDecorators(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth)),
-		mpb.AppendDecorators(decor.Percentage()),
+		mpb.AppendDecorators(decor.Percentage(decor.WCSyncSpace)),
 	)
+	
+	go func() {
+		select {
+		case <-canSig:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	logging.PrintDisplayLog = func(message string) {
+		pb.Add(0, makeLogBar(message)).SetTotal(0, true)
+	}
 
 	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
-	worker := converter.NewWorker(ctx, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
-	worker.WaitGroup.Wait()
+	converter.NewWorker(ctx, &wg, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
+	pb.Wait()
+}
+
+func makeLogBar(msg string) mpb.FillerFunc {
+	limit := "%%.%ds"
+	return func(w io.Writer, width int, st *decor.Statistics) {
+		fmt.Fprintf(w, fmt.Sprintf(limit, width), msg)
+	}
 }
