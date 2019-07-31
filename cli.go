@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os/signal"
 	"context"
 	"flag"
 	"fmt"
@@ -138,7 +139,10 @@ func main() {
 
 	logging.Log("Version: %s", Version)
 
-	ctx := context.Background()
+	// We have to use a seperate context for the workers, because they must be stopped
+	// before the bars
+	ctx, cancel := context.WithCancel(context.Background())
+	workerCtx, workerCancel := context.WithCancel(ctx)
 
 	var oitc *oitcdb.OITC
 	if !cli.nosql {
@@ -154,7 +158,7 @@ func main() {
 	if cli.maxAge > 0 {
 		oldest = time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
 	}
-	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(ctx, cli.sourceDirectory), oldest, cli.limit)
+	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(workerCtx, cli.sourceDirectory), oldest, cli.limit)
 	if err != nil {
 		logging.LogFatal("Could not scan rrd path: %s", err)
 	}
@@ -173,7 +177,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	pb := mpb.NewWithContext(ctx, mpb.PopCompletedMode(), mpb.WithRefreshRate(1*time.Second), mpb.WithWaitGroup(&wg))
+	pb := mpb.NewWithContext(ctx, mpb.PopCompletedMode(), mpb.WithRefreshRate(1*time.Second))
 	bar := pb.AddBar(
 		int64(len(workdata.RrdSets)),
 		mpb.BarNoPop(),
@@ -188,9 +192,28 @@ func main() {
 	logging.PrintDisplayLog = func(message string) {
 		pb.Add(0, makeLogBar(message)).SetTotal(0, true)
 	}
+	
+	canSig := make(chan os.Signal, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-canSig:
+			workerCancel()
+			logging.LogDisplayV("Waiting for running workers to finish")
+			wg.Wait()
+			logging.LogDisplayV("All workers stopped")
+			bar.SetTotal(0, true)
+			cancel()
+			return
+		}
+	}()
 
-	cvt := converter.NewConverter(ctx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
-	converter.NewWorker(ctx, &wg, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
+	signal.Notify(canSig, os.Interrupt, os.Kill)
+
+	cvt := converter.NewConverter(workerCtx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
+	converter.NewWorker(workerCtx, &wg, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
+	wg.Wait()
 	pb.Wait()
 }
 
