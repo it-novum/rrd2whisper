@@ -88,7 +88,7 @@ func NewWorkdata(rrdPath *RrdPath, oldest time.Time, limit int) (*Workdata, erro
 		workdata.Total++
 		if !rrd.Updated {
 			workdata.Corrupt++
-		} else if rrd.TooOld(oldest) {
+		} else if !oldest.IsZero() && rrd.TooOld(oldest) {
 			workdata.TooOld++
 		} else if rrd.Todo() {
 			rrdSets = append(rrdSets, rrd)

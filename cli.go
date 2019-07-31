@@ -1,9 +1,6 @@
 package main
 
 import (
-	"sync"
-	"os/signal"
-	"io"
 	"context"
 	"flag"
 	"fmt"
@@ -13,10 +10,12 @@ import (
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -49,8 +48,8 @@ func parseCli() (*commandLine, error) {
 	var err error
 
 	cli := new(commandLine)
-	flag.StringVar(&cli.sourceDirectory, "source", "/var/lib/graphite/whisper/openitcockpit", "Path to source directory file tree of rrd files")
-	flag.StringVar(&cli.destDirectory, "destination", "/opt/openitc/nagios/share/perfdata", "Destination of file tree for whisper")
+	flag.StringVar(&cli.sourceDirectory, "source", "/opt/openitc/nagios/share/perfdata", "Path to source directory file tree of rrd files")
+	flag.StringVar(&cli.destDirectory, "destination", "/var/lib/graphite/whisper/openitcockpit", "Destination of file tree for whisper")
 	flag.StringVar(&cli.archiveDirectory, "archive", "/var/backups/old-whisper-files", "Path where replaced whisper files are stored")
 	flag.StringVar(&cli.tempDirectory, "tmp-dir", "/tmp", "Alternative path to store temporary files")
 	flag.BoolVar(&cli.includeCorrupt, "include-corrupt", false, "Include rrd files that could not be updated")
@@ -120,7 +119,6 @@ func (bi *barIncrementor) Visit(_ *rrdpath.RrdSet, duration time.Duration, _ err
 	bi.bar.Increment(duration)
 }
 
-
 func main() {
 	cli, err := parseCli()
 	if err != nil {
@@ -140,9 +138,7 @@ func main() {
 
 	logging.Log("Version: %s", Version)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	canSig := make(chan os.Signal, 1)
-	signal.Notify(canSig, os.Interrupt, os.Kill)
+	ctx := context.Background()
 
 	var oitc *oitcdb.OITC
 	if !cli.nosql {
@@ -155,7 +151,10 @@ func main() {
 
 	// TODO: age zero == all
 	logging.LogDisplay("Scanning %s for xml perfdata files", cli.sourceDirectory)
-	oldest := time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
+	var oldest time.Time
+	if cli.maxAge > 0 {
+		oldest = time.Now().Add(-time.Duration(cli.maxAge) * time.Second)
+	}
 	workdata, err := rrdpath.NewWorkdata(rrdpath.Walk(ctx, cli.sourceDirectory), oldest, cli.limit)
 	if err != nil {
 		logging.LogFatal("Could not scan rrd path: %s", err)
@@ -175,21 +174,17 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	pb := mpb.NewWithContext(ctx, mpb.PopCompletedMode(), mpb.WithRefreshRate(1 * time.Second), mpb.WithWaitGroup(&wg))
+	pb := mpb.NewWithContext(ctx, mpb.PopCompletedMode(), mpb.WithRefreshRate(1*time.Second), mpb.WithWaitGroup(&wg))
 	bar := pb.AddBar(
 		int64(len(workdata.RrdSets)),
 		mpb.BarNoPop(),
 		mpb.PrependDecorators(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth)),
-		mpb.AppendDecorators(decor.Percentage(decor.WCSyncSpace)),
+		mpb.AppendDecorators(
+			decor.Percentage(decor.WCSyncSpace),
+			decor.Elapsed(decor.ET_STYLE_GO, decor.WCSyncSpace),
+			decor.NewAverageETA(decor.ET_STYLE_GO, time.Now(), decor.WCSyncSpace),
+		),
 	)
-	
-	go func() {
-		select {
-		case <-canSig:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
 
 	logging.PrintDisplayLog = func(message string) {
 		pb.Add(0, makeLogBar(message)).SetTotal(0, true)
@@ -201,8 +196,7 @@ func main() {
 }
 
 func makeLogBar(msg string) mpb.FillerFunc {
-	limit := "%%.%ds"
 	return func(w io.Writer, width int, st *decor.Statistics) {
-		fmt.Fprintf(w, fmt.Sprintf(limit, width), msg)
+		fmt.Fprint(w, msg)
 	}
 }

@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"sync"
 	"context"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/it-novum/rrd2whisper/testsuite"
@@ -46,9 +47,11 @@ func TestWorker(t *testing.T) {
 		errors: make([]error, 0),
 	}
 
+	var wg sync.WaitGroup
+
 	cvt := NewConverter(context.Background(), ts.Destination, ts.Archive, ts.Temp, true, nil)
-	worker := NewWorker(context.Background(), workdata.RrdSets, 1, cvt, vs)
-	worker.WaitGroup.Wait()
+	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
+	wg.Wait()
 	if len(vs.errors) != 0 {
 		for i := 0; i < len(vs.errors); i++ {
 			t.Error(vs.errors[i])
@@ -83,10 +86,12 @@ func TestWorkerCancel(t *testing.T) {
 		errors: make([]error, 0),
 	}
 
+	var wg sync.WaitGroup
+
 	cvt := NewConverter(ctx, ts.Destination, ts.Archive, ts.Temp, true, nil)
 	cancel()
-	worker := NewWorker(ctx, workdata.RrdSets, 1, cvt, vs)
-	worker.WaitGroup.Wait()
+	NewWorker(ctx, &wg, workdata.RrdSets, 1, cvt, vs)
+	wg.Wait()
 	if len(vs.errors) != 1 {
 		t.Errorf("Expected 1 error with context canceled, but got %d:", len(vs.errors))
 		for i := 0; i < len(vs.errors); i++ {
@@ -97,4 +102,29 @@ func TestWorkerCancel(t *testing.T) {
 	if vs.errors[0].Error() != "context canceled" {
 		t.Errorf("error message is not context canceled, maybe cancelation failed: %s", vs.errors[0])
 	}
+}
+
+func TestWorkerEmpty(t *testing.T) {
+	ts := testsuite.Prepare()
+	defer ts.Shutdown()
+
+	SetRetention("60s:365d")
+
+	var oldest time.Time // == 0
+
+	rrdPath := rrdpath.Walk(context.Background(), ts.Source)
+	workdata, err := rrdpath.NewWorkdata(rrdPath, oldest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vs := &testWorkerVisitor{
+		errors: make([]error, 0),
+	}
+
+	var wg sync.WaitGroup
+
+	cvt := NewConverter(context.Background(), ts.Destination, ts.Archive, ts.Temp, true, nil)
+	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
+	wg.Wait()
 }

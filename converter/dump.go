@@ -32,7 +32,8 @@ func NewRrdDumperHelper(ctx context.Context, path string) (*RrdDumperHelper, err
 }
 
 func (rdh *RrdDumperHelper) work() {
-	done := rdh.ctx.Done()
+	defer rdh.dumper.Free()
+	defer close(rdh.results)
 	for row := rdh.dumper.Next(); row != nil; row = rdh.dumper.Next() {
 		hasVal := false
 		for _, val := range row.Values {
@@ -43,22 +44,18 @@ func (rdh *RrdDumperHelper) work() {
 		}
 		if hasVal {
 			select {
-			case <-done:
-				close(rdh.results)
+			case <-rdh.ctx.Done():
 				return
 			case rdh.results <- row:
 			}
 		} else {
 			select {
-			case <-done:
-				close(rdh.results)
+			case <-rdh.ctx.Done():
 				return
 			default:
 			}
 		}
 	}
-	close(rdh.results)
-	rdh.dumper.Free()
 }
 
 // Results returns a channel with the rows of the rrd file

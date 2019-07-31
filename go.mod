@@ -12,7 +12,7 @@ require (
 	github.com/smartystreets/assertions v1.0.1 // indirect
 	github.com/smartystreets/goconvey v0.0.0-20190710185942-9d28bd7c0945 // indirect
 	github.com/vbauerster/mpb/v4 v4.9.0
-	golang.org/x/sys v0.0.0-20190726091711-fc99dfbffb4e // indirect
+	golang.org/x/sys v0.0.0-20190730183949-1393eb018365 // indirect
 	google.golang.org/appengine v1.6.1 // indirect
 	gopkg.in/ini.v1 v1.44.0 // indirect
 )

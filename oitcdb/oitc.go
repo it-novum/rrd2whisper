@@ -78,7 +78,7 @@ func (oitc *OITC) FetchPerfdata(servicename string) (string, error) {
 		res, err = oitc.queryPerfdata(servicename)
 		if err != nil {
 			time.Sleep(time.Second)
-			logging.Log("lost connection to mysql server -> retry\n")
+			logging.Log("lost connection to mysql server -> retry")
 		} else {
 			return res, err
 		}

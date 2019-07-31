@@ -1,11 +1,11 @@
 package converter
 
 import (
-	"time"
 	"context"
 	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"sync"
+	"time"
 )
 
 // RrdSetVisitor is called by the worker after a conversion
@@ -16,12 +16,13 @@ type RrdSetVisitor interface {
 
 // Worker helps to process a list of rrd files to whisper
 type Worker struct {
-	cvt       *Converter
-	visitor   RrdSetVisitor
-	jobs      chan *rrdpath.RrdSet
-	ctx       context.Context
-	rrdSets   []*rrdpath.RrdSet
-	wg *sync.WaitGroup
+	cvt     *Converter
+	visitor RrdSetVisitor
+	jobs    chan *rrdpath.RrdSet
+	ctx     context.Context
+	rrdSets []*rrdpath.RrdSet
+	wg      *sync.WaitGroup
+	begin   time.Time
 }
 
 // NewWorker starts processing the rrd files
@@ -32,7 +33,8 @@ func NewWorker(ctx context.Context, wg *sync.WaitGroup, rrdSets []*rrdpath.RrdSe
 		visitor: visitor,
 		jobs:    make(chan *rrdpath.RrdSet, parallel+1),
 		rrdSets: rrdSets,
-		wg: wg,
+		wg:      wg,
+		begin:   time.Now(),
 	}
 
 	for i := 0; i < parallel; i++ {
@@ -56,14 +58,13 @@ func (w *Worker) work() {
 			if !ok {
 				return
 			}
-			begin := time.Now()
 			err := w.cvt.Convert(job)
 			if err != nil {
 				logging.LogDisplay("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 			} else {
 				logging.LogDisplay("successfully converted %s to whisper", job.RrdPath)
 			}
-			w.visitor.Visit(job, time.Since(begin), err)
+			w.visitor.Visit(job, time.Since(w.begin), err)
 		}
 	}
 }
