@@ -101,7 +101,7 @@ func NewWorkdata(rrdPath *RrdPath, oldest time.Time, limit int) (*Workdata, erro
 	}
 
 	workdata.BrokenXML = rrdPath.BrokenXML()
-	if limit <= 0 {
+	if limit <= 0 || limit > len(rrdSets) {
 		workdata.RrdSets = rrdSets
 	} else {
 		workdata.RrdSets = rrdSets[:limit]
