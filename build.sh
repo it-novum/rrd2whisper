@@ -3,12 +3,12 @@
 set -eof
 
 mkdir -p build/env
-test -f build/golang.tar.gz || wget -O build/golang.tar.gz https://dl.google.com/go/go1.12.7.linux-amd64.tar.gz
+test -f build/golang.tar.gz || wget -O build/golang.tar.gz https://golang.org/dl/go1.15.linux-amd64.tar.gz
 test -d build/go || tar xf build/golang.tar.gz -C build
 
 VERSION=$(cat VERSION)
 
-for distribution in bionic xenial trusty stretch buster; do
+for distribution in bionic xenial trusty stretch buster focal; do
     if [ ! -z "$1" ] && [ "$1" != "$distribution" ]; then
         continue
     fi

@@ -1,0 +1,9 @@
+FROM ubuntu:focal
+
+ENV DEBIAN_FRONTEND=noninteractive PATH=$PATH:/usr/local/go/bin GOROOT=/usr/local/go GOPATH=/root/go
+
+RUN apt-get update && \
+    apt-get install -y librrd-dev bash git build-essential pkg-config && \
+    mkdir /build
+
+WORKDIR /build

@@ -1,5 +1,7 @@
 module github.com/it-novum/rrd2whisper
 
+go 1.15
+
 require (
 	github.com/go-graphite/go-whisper v0.0.0-20190716075705-1ab6a3545b68
 	github.com/go-ini/ini v1.44.0
