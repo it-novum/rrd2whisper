@@ -2,10 +2,11 @@ package converter
 
 import (
 	"context"
-	"github.com/it-novum/rrd2whisper/logging"
-	"github.com/it-novum/rrd2whisper/rrdpath"
 	"sync"
 	"time"
+
+	"github.com/it-novum/rrd2whisper/logging"
+	"github.com/it-novum/rrd2whisper/rrdpath"
 )
 
 // RrdSetVisitor is called by the worker after a conversion
@@ -58,7 +59,7 @@ func (w *Worker) work() {
 			if !ok {
 				return
 			}
-			err := w.cvt.Convert(job)
+			err := w.cvt.Convert(w.ctx, job)
 			if err != nil {
 				logging.LogDisplay("error: Could not convert rrd file %s: %s", job.RrdPath, err)
 			} else {

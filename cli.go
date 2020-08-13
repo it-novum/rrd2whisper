@@ -1,23 +1,24 @@
 package main
 
 import (
-	"os/signal"
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
+
 	"github.com/it-novum/rrd2whisper/converter"
 	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
-	"io"
-	"log"
-	"os"
-	"path/filepath"
-	"runtime"
-	"sync"
-	"time"
 )
 
 var (
@@ -43,6 +44,7 @@ type commandLine struct {
 	logfile          string
 	nosql            bool
 	version          bool
+	deleteRRD        bool
 }
 
 func parseCli() (*commandLine, error) {
@@ -66,6 +68,7 @@ func parseCli() (*commandLine, error) {
 	flag.BoolVar(&cli.nosql, "no-sql", false, "Don't query the database for correct perfdata names")
 	flag.IntVar(&cli.mysqlRetry, "mysql-retry", 30, "retry N times if connection to mysql server is lost with 1s delay")
 	flag.BoolVar(&cli.version, "version", false, "show version and exit")
+	flag.BoolVar(&cli.deleteRRD, "delete-rrd", false, "delete rrd file after convertion")
 	flag.Parse()
 
 	if Version == "" {
@@ -185,14 +188,14 @@ func main() {
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WCSyncSpace),
 			decor.Elapsed(decor.ET_STYLE_GO, decor.WCSyncSpace),
-			decor.NewAverageETA(decor.ET_STYLE_GO, time.Now(), decor.WCSyncSpace),
+			decor.NewAverageETA(decor.ET_STYLE_GO, time.Now(), decor.FixedIntervalTimeNormalizer(5), decor.WCSyncSpace),
 		),
 	)
 
 	logging.PrintDisplayLog = func(message string) {
 		pb.Add(0, makeLogBar(message)).SetTotal(0, true)
 	}
-	
+
 	canSig := make(chan os.Signal, 1)
 	go func() {
 		select {
@@ -211,7 +214,7 @@ func main() {
 
 	signal.Notify(canSig, os.Interrupt, os.Kill)
 
-	cvt := converter.NewConverter(workerCtx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
+	cvt := &converter.Converter{Destination: cli.destDirectory, ArchivePath: cli.archiveDirectory, TempPath: cli.tempDirectory, Merge: !cli.noMerge, OITC: oitc, DeleteRRD: cli.deleteRRD}
 	converter.NewWorker(workerCtx, &wg, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
 	wg.Wait()
 	pb.Wait()

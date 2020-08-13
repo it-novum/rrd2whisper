@@ -2,8 +2,6 @@ package testsuite
 
 import (
 	"fmt"
-	"github.com/jabdr/nagios-perfdata"
-	"github.com/jabdr/rrd"
 	"io/ioutil"
 	"math"
 	"math/rand"
@@ -14,6 +12,9 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	perfdata "github.com/jabdr/nagios-perfdata"
+	"github.com/jabdr/rrd"
 )
 
 const DAY = time.Duration(24*60*60) * time.Second

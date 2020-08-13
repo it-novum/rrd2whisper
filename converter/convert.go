@@ -3,17 +3,18 @@ package converter
 import (
 	"context"
 	"fmt"
-	"github.com/go-graphite/go-whisper"
-	"github.com/it-novum/rrd2whisper/logging"
-	"github.com/it-novum/rrd2whisper/oitcdb"
-	"github.com/it-novum/rrd2whisper/rrdpath"
-	"github.com/jabdr/nagios-perfdata"
 	"io/ioutil"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"github.com/go-graphite/go-whisper"
+	"github.com/it-novum/rrd2whisper/logging"
+	"github.com/it-novum/rrd2whisper/oitcdb"
+	"github.com/it-novum/rrd2whisper/rrdpath"
+	perfdata "github.com/jabdr/nagios-perfdata"
 )
 
 var illegalCharactersRegexp = regexp.MustCompile(`[^a-zA-Z^0-9\\-\\.]`)
@@ -36,29 +37,17 @@ func SetRetention(retention string) error {
 
 // Converter converts rrd files to whisper
 type Converter struct {
-	merge       bool
-	destination string
-	archivePath string
-	tempPath    string
-	oitc        *oitcdb.OITC
-	ctx         context.Context
-}
-
-// NewConverter is the constructor for Converter
-func NewConverter(ctx context.Context, destination, archivePath, tempPath string, merge bool, oitc *oitcdb.OITC) *Converter {
-	return &Converter{
-		merge:       merge,
-		destination: destination,
-		archivePath: archivePath,
-		tempPath:    tempPath,
-		oitc:        oitc,
-		ctx:         ctx,
-	}
+	Merge       bool
+	DeleteRRD   bool
+	Destination string
+	ArchivePath string
+	TempPath    string
+	OITC        *oitcdb.OITC
 }
 
 func (cvt *Converter) checkPerfdata(servicename string) ([]string, error) {
-	if cvt.oitc != nil {
-		perfStr, err := cvt.oitc.FetchPerfdata(servicename)
+	if cvt.OITC != nil {
+		perfStr, err := cvt.OITC.FetchPerfdata(servicename)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +152,7 @@ func (cs *convertSource) mergeAndArchive(lastUpdate int) error {
 }
 
 // Convert an rrd file to whisper files
-func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
+func (cvt *Converter) Convert(ctx context.Context, rrdSet *rrdpath.RrdSet) error {
 	dbLabels, err := cvt.checkPerfdata(rrdSet.Servicename)
 	if err != nil {
 		return err
@@ -175,18 +164,18 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 		rrdSet.Datasources = dbLabels
 	}
 
-	destdir := fmt.Sprintf("%s/%s/%s", cvt.destination, rrdSet.Hostname, rrdSet.Servicename)
+	destdir := fmt.Sprintf("%s/%s/%s", cvt.Destination, rrdSet.Hostname, rrdSet.Servicename)
 	archivedir := ""
-	if cvt.archivePath != "" {
-		archivedir = fmt.Sprintf("%s/%s/%s", cvt.archivePath, rrdSet.Hostname, rrdSet.Servicename)
+	if cvt.ArchivePath != "" {
+		archivedir = fmt.Sprintf("%s/%s/%s", cvt.ArchivePath, rrdSet.Hostname, rrdSet.Servicename)
 	}
-	tmpdir, err := ioutil.TempDir(cvt.tempPath, "rrd2whisper")
+	tmpdir, err := ioutil.TempDir(cvt.TempPath, "rrd2whisper")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmpdir)
 
-	dumperHelper, err := NewRrdDumperHelper(cvt.ctx, rrdSet.RrdPath)
+	dumperHelper, err := NewRrdDumperHelper(ctx, rrdSet.RrdPath)
 	if err != nil {
 		return err
 	}
@@ -214,16 +203,16 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 
 	// Check if canceld while dumping
 	select {
-	case <-cvt.ctx.Done():
-		return cvt.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
 	}
 
-	if cvt.merge {
+	if cvt.Merge {
 		for _, source := range sources {
 			source.mergeAndArchive(lastUpdate)
 		}
-	} else if cvt.archivePath != "" {
+	} else if cvt.ArchivePath != "" {
 		for _, source := range sources {
 			source.archive()
 		}
@@ -243,8 +232,18 @@ func (cvt *Converter) Convert(rrdSet *rrdpath.RrdSet) error {
 		}
 	}
 
-	if err = rrdSet.Done(); err != nil {
+	var deleteError error = nil
+
+	if cvt.DeleteRRD {
+		deleteError = os.Remove(rrdSet.RrdPath)
+	}
+
+	err = rrdSet.Done()
+	if err != nil {
 		return err
+	}
+	if deleteError != nil {
+		return deleteError
 	}
 
 	return nil
