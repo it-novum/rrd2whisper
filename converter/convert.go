@@ -37,34 +37,31 @@ func SetRetention(retention string) error {
 
 // Converter converts rrd files to whisper
 type Converter struct {
-	Merge       bool
-	DeleteRRD   bool
-	Destination string
-	ArchivePath string
-	TempPath    string
-	OITC        *oitcdb.OITC
+	Merge          bool
+	DeleteRRD      bool
+	Destination    string
+	ArchivePath    string
+	TempPath       string
+	UUIDToPerfdata oitcdb.UUIDToPerfdata
 }
 
 func (cvt *Converter) checkPerfdata(servicename string) ([]string, error) {
-	if cvt.OITC != nil {
-		perfStr, err := cvt.OITC.FetchPerfdata(servicename)
+	perfStr := cvt.UUIDToPerfdata[servicename]
+
+	if perfStr != "" {
+		logging.Log("service perfdata in db \"%s\" -> \"%s\"", servicename, perfStr)
+		pfdatas, err := perfdata.ParsePerfdata(perfStr)
 		if err != nil {
-			return nil, err
+			logging.Log("service %s has invalid perfdata in db: %s", servicename, err)
+			return nil, nil
 		}
-		if perfStr != "" {
-			logging.Log("service perfdata in db \"%s\" -> \"%s\"", servicename, perfStr)
-			pfdatas, err := perfdata.ParsePerfdata(perfStr)
-			if err != nil {
-				logging.Log("service %s has invalid perfdata in db: %s", servicename, err)
-				return nil, nil
-			}
-			result := make([]string, len(pfdatas))
-			for i, pf := range pfdatas {
-				result[i] = pf.Label
-			}
-			return result, nil
+		result := make([]string, len(pfdatas))
+		for i, pf := range pfdatas {
+			result[i] = pf.Label
 		}
+		return result, nil
 	}
+
 	return nil, nil
 }
 

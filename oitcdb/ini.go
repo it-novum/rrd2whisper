@@ -1,8 +1,9 @@
 package oitcdb
 
 import (
-	"github.com/go-ini/ini"
 	"fmt"
+
+	"github.com/go-ini/ini"
 )
 
 func readMySQLINI(path string) (string, error) {
@@ -38,7 +39,7 @@ func readMySQLINI(path string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true", user, password, host, port, database), nil
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", user, password, host, port, database), nil
 }
 
 func readIniString(sec *ini.Section, name string) (string, error) {

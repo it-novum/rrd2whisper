@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/it-novum/rrd2whisper/testsuite"
 	perfdata "github.com/jabdr/nagios-perfdata"
@@ -51,7 +52,7 @@ func TestWorker(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, OITC: nil, DeleteRRD: false}
+	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, UUIDToPerfdata: make(oitcdb.UUIDToPerfdata), DeleteRRD: false}
 	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
 	wg.Wait()
 	if len(vs.errors) != 0 {
@@ -91,7 +92,7 @@ func TestWorkerDelete(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, OITC: nil, DeleteRRD: true}
+	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, UUIDToPerfdata: make(oitcdb.UUIDToPerfdata), DeleteRRD: true}
 	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
 	wg.Wait()
 	if len(vs.errors) != 0 {
@@ -135,7 +136,7 @@ func TestWorkerNoDelete(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, OITC: nil, DeleteRRD: false}
+	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, UUIDToPerfdata: make(oitcdb.UUIDToPerfdata), DeleteRRD: false}
 	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
 	wg.Wait()
 	if len(vs.errors) != 0 {
@@ -178,7 +179,7 @@ func TestWorkerCancel(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, OITC: nil, DeleteRRD: false}
+	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, UUIDToPerfdata: make(oitcdb.UUIDToPerfdata), DeleteRRD: false}
 	cancel()
 	NewWorker(ctx, &wg, workdata.RrdSets, 1, cvt, vs)
 	wg.Wait()
@@ -211,7 +212,7 @@ func TestWorkerEmpty(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, OITC: nil, DeleteRRD: false}
+	cvt := &Converter{Destination: ts.Destination, ArchivePath: ts.Archive, TempPath: ts.Temp, Merge: true, UUIDToPerfdata: make(oitcdb.UUIDToPerfdata), DeleteRRD: false}
 	NewWorker(context.Background(), &wg, workdata.RrdSets, 1, cvt, vs)
 	wg.Wait()
 }
