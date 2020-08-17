@@ -1,11 +1,10 @@
 package oitcdb
 
 import (
-	"github.com/it-novum/rrd2whisper/logging"
 	"context"
 	"database/sql"
+
 	_ "github.com/go-sql-driver/mysql" // ensure mysql driver is loaded
-	"time"
 )
 
 // OITC can be used to connect to the oitc database
@@ -14,6 +13,9 @@ type OITC struct {
 	retry int
 	ctx   context.Context
 }
+
+// UUIDToPerfdata is map of uuid to perfdata line from the database
+type UUIDToPerfdata map[string]string
 
 // NewOITC connects to the mysql server
 func NewOITC(ctx context.Context, dsn, ini string, retry int) (*OITC, error) {
@@ -41,47 +43,59 @@ func (oitc *OITC) Close() error {
 	return oitc.db.Close()
 }
 
-func (oitc *OITC) queryPerfdata(servicename string) (string, error) {
-	row := oitc.db.QueryRowContext(
-		oitc.ctx,
-		"SELECT nagios_objects.object_id, nagios_servicechecks.perfdata, MAX(nagios_servicechecks.start_time) AS start_time, nagios_objects.name2 "+
-			"FROM nagios_objects INNER JOIN nagios_servicechecks ON nagios_servicechecks.service_object_id = nagios_objects.object_id "+
-			"WHERE nagios_objects.name2 = ? "+
-			"AND nagios_servicechecks.perfdata IS NOT NULL "+
-			"GROUP BY nagios_objects.object_id",
-		servicename)
+// V3QueryPerfdata returns a key value map for all services that have perfdata for evaluation of perfdata names
+func (oitc *OITC) V3QueryPerfdata() (UUIDToPerfdata, error) {
+	result := make(UUIDToPerfdata, 0)
 
-	var (
-		objectID  int64
-		perfdata  string
-		startTime time.Time
-		uuid      string
-	)
-	err := row.Scan(&objectID, &perfdata, &startTime, &uuid)
-	switch {
-	case err == sql.ErrNoRows:
-		return "", nil
-	case err != nil:
-		return "", err
-	default:
-		return perfdata, nil
+	rows, err := oitc.db.QueryContext(oitc.ctx, `SELECT nagios_objects.object_id, nagios_servicechecks.perfdata, MAX(nagios_servicechecks.start_time) AS start_time, nagios_objects.name2 FROM nagios_objects INNER JOIN nagios_servicechecks ON nagios_servicechecks.service_object_id = nagios_objects.object_id WHERE  nagios_servicechecks.perfdata IS NOT NULL AND nagios_servicechecks.perfdata != "" GROUP BY nagios_objects.object_id`)
+	if err != nil {
+		return nil, err
 	}
+
+	for rows.Next() {
+		var (
+			objectID  int64
+			perfdata  string
+			startTime []uint8
+			uuid      string
+		)
+		if err := rows.Scan(&objectID, &perfdata, &startTime, &uuid); err != nil {
+			return nil, err
+		}
+		result[uuid] = perfdata
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
-// FetchPerfdata quries the database for the perfdata of the specified service
-// servicename must be the UUID of the server
-// if the service doesn't have perfdata it returns an empty string
-func (oitc *OITC) FetchPerfdata(servicename string) (string, error) {
-	var res string
-	var err error
-	for currentTry := 0; currentTry < oitc.retry; currentTry++ {
-		res, err = oitc.queryPerfdata(servicename)
-		if err != nil {
-			time.Sleep(time.Second)
-			logging.Log("lost connection to mysql server -> retry")
-		} else {
-			return res, err
-		}
+// V4QueryPerfdata returns a key value map for all services that have perfdata for evaluation of perfdata names
+func (oitc *OITC) V4QueryPerfdata() (UUIDToPerfdata, error) {
+	result := make(UUIDToPerfdata, 0)
+
+	rows, err := oitc.db.QueryContext(oitc.ctx, `SELECT perfdata, MAX(start_time) AS start_time, service_description FROM statusengine_servicechecks WHERE  perfdata IS NOT NULL AND perfdata != "" GROUP BY statusengine_servicechecks.service_description`)
+	if err != nil {
+		return nil, err
 	}
-	return res, err
+
+	for rows.Next() {
+		var (
+			perfdata  string
+			startTime []uint8
+			uuid      string
+		)
+		if err := rows.Scan(&perfdata, &startTime, &uuid); err != nil {
+			return nil, err
+		}
+		result[uuid] = perfdata
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

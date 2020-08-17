@@ -1,23 +1,26 @@
 package main
 
 import (
-	"os/signal"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
+
 	"github.com/it-novum/rrd2whisper/converter"
 	"github.com/it-novum/rrd2whisper/logging"
 	"github.com/it-novum/rrd2whisper/oitcdb"
 	"github.com/it-novum/rrd2whisper/rrdpath"
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
-	"io"
-	"log"
-	"os"
-	"path/filepath"
-	"runtime"
-	"sync"
-	"time"
 )
 
 var (
@@ -43,6 +46,10 @@ type commandLine struct {
 	logfile          string
 	nosql            bool
 	version          bool
+	deleteRRD        bool
+	oitcVersion      int
+	sqlCache         string
+	onlySQLCache     bool
 }
 
 func parseCli() (*commandLine, error) {
@@ -66,6 +73,10 @@ func parseCli() (*commandLine, error) {
 	flag.BoolVar(&cli.nosql, "no-sql", false, "Don't query the database for correct perfdata names")
 	flag.IntVar(&cli.mysqlRetry, "mysql-retry", 30, "retry N times if connection to mysql server is lost with 1s delay")
 	flag.BoolVar(&cli.version, "version", false, "show version and exit")
+	flag.BoolVar(&cli.deleteRRD, "delete-rrd", false, "delete rrd file after convertion")
+	flag.IntVar(&cli.oitcVersion, "oitc-version", 3, "either 3 or 4, used for only for sql queries")
+	flag.StringVar(&cli.sqlCache, "sql-cache", "", "Path to sql cache file. If -no-sql is specified and the file exists it will be used if possible. The file will be created if -no-sql is not specified.")
+	flag.BoolVar(&cli.onlySQLCache, "only-sql-cache", false, "If set, it will only create the sql cache file and exit")
 	flag.Parse()
 
 	if Version == "" {
@@ -81,15 +92,31 @@ func parseCli() (*commandLine, error) {
 		cli.parallel = 1
 	}
 
-	if _, err = os.Stat(cli.sourceDirectory); os.IsNotExist(err) {
-		return cli, fmt.Errorf("source directory does not exist")
+	if !(cli.oitcVersion >= 3 && cli.oitcVersion <= 4) {
+		logging.LogFatal("invalid oitc version")
+		fmt.Println("invalid oitc version")
 	}
-	if cli.sourceDirectory, err = filepath.Abs(cli.sourceDirectory); err != nil {
-		return cli, fmt.Errorf("could not get absolute path of source directory: %s", err)
+
+	if cli.nosql && cli.onlySQLCache {
+		logging.LogFatal("-no-sql and -only-sql-cache specified")
 	}
-	if cli.includeCorrupt {
-		fmt.Println("Converting corrupt rrd files! This usually doesn't make any sense and produces only garbage.")
+
+	if cli.onlySQLCache && cli.sqlCache == "" {
+		logging.LogFatal("-sql-cache is required for -only-sql-cache")
 	}
+
+	if !cli.onlySQLCache {
+		if _, err = os.Stat(cli.sourceDirectory); os.IsNotExist(err) {
+			return cli, fmt.Errorf("source directory does not exist")
+		}
+		if cli.sourceDirectory, err = filepath.Abs(cli.sourceDirectory); err != nil {
+			return cli, fmt.Errorf("could not get absolute path of source directory: %s", err)
+		}
+		if cli.includeCorrupt {
+			fmt.Println("Converting corrupt rrd files! This usually doesn't make any sense and produces only garbage.")
+		}
+	}
+
 	if !cli.nosql && cli.mysqlDSN == "" {
 		if _, err = os.Stat(cli.mysqlINI); os.IsNotExist(err) {
 			return cli, fmt.Errorf("mysql ini does not exist and no dsn is specified")
@@ -98,7 +125,7 @@ func parseCli() (*commandLine, error) {
 	if cli.mysqlRetry <= 0 {
 		cli.mysqlRetry = 1
 	}
-	if !cli.checkOnly {
+	if !cli.checkOnly && !cli.onlySQLCache {
 		if cli.destDirectory == "" {
 			return cli, fmt.Errorf("need -dest for whisper files output")
 		}
@@ -118,6 +145,49 @@ type barIncrementor struct {
 
 func (bi *barIncrementor) Visit(_ *rrdpath.RrdSet, duration time.Duration, _ error) {
 	bi.bar.Increment(duration)
+}
+
+func queryDB(ctx context.Context, cli *commandLine) (oitcdb.UUIDToPerfdata, error) {
+	var (
+		perfdata oitcdb.UUIDToPerfdata
+		oitc     *oitcdb.OITC
+		err      error
+	)
+
+	oitc, err = oitcdb.NewOITC(ctx, cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
+	if err != nil {
+		logging.LogFatal("could not connect to mysql: %s", err)
+	}
+	defer oitc.Close()
+
+	if cli.oitcVersion == 3 {
+		perfdata, err = oitc.V3QueryPerfdata()
+		if err != nil {
+			logging.LogFatal("could not query database perfdata: ", err)
+		}
+	} else {
+		perfdata, err = oitc.V4QueryPerfdata()
+		if err != nil {
+			logging.LogFatal("could not query database perfdata: ", err)
+		}
+	}
+
+	if cli.sqlCache != "" {
+		if data, err := json.Marshal(&perfdata); err != nil {
+			logging.LogFatal("could not create json for sql cache file: %s", err)
+		} else {
+			if err := ioutil.WriteFile(cli.sqlCache, data, 0644); err != nil {
+				logging.LogFatal("could not write sql cache file: %s", err)
+			}
+		}
+	}
+
+	logging.Log("created sql cache file")
+	if cli.onlySQLCache {
+		os.Exit(0)
+	}
+
+	return perfdata, nil
 }
 
 func main() {
@@ -143,14 +213,20 @@ func main() {
 	// before the bars
 	ctx, cancel := context.WithCancel(context.Background())
 	workerCtx, workerCancel := context.WithCancel(ctx)
+	var perfdata oitcdb.UUIDToPerfdata
 
-	var oitc *oitcdb.OITC
-	if !cli.nosql {
-		oitc, err = oitcdb.NewOITC(ctx, cli.mysqlDSN, cli.mysqlINI, cli.mysqlRetry)
-		if err != nil {
-			logging.LogFatal("could not connect to mysql: %s", err)
+	if cli.sqlCache != "" && cli.nosql {
+		if data, err := ioutil.ReadFile(cli.sqlCache); err != nil {
+			logging.LogFatal("could not read sql cache file: %s", err)
+		} else {
+			if err := json.Unmarshal(data, &perfdata); err != nil {
+				logging.LogFatal("could not parse sql cache file: %s", err)
+			}
 		}
-		defer oitc.Close()
+	}
+
+	if !cli.nosql {
+		perfdata, err = queryDB(ctx, cli)
 	}
 
 	logging.LogDisplay("Scanning %s for xml perfdata files", cli.sourceDirectory)
@@ -185,14 +261,14 @@ func main() {
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WCSyncSpace),
 			decor.Elapsed(decor.ET_STYLE_GO, decor.WCSyncSpace),
-			decor.NewAverageETA(decor.ET_STYLE_GO, time.Now(), decor.WCSyncSpace),
+			decor.NewAverageETA(decor.ET_STYLE_GO, time.Now(), decor.FixedIntervalTimeNormalizer(5), decor.WCSyncSpace),
 		),
 	)
 
 	logging.PrintDisplayLog = func(message string) {
 		pb.Add(0, makeLogBar(message)).SetTotal(0, true)
 	}
-	
+
 	canSig := make(chan os.Signal, 1)
 	go func() {
 		select {
@@ -211,7 +287,7 @@ func main() {
 
 	signal.Notify(canSig, os.Interrupt, os.Kill)
 
-	cvt := converter.NewConverter(workerCtx, cli.destDirectory, cli.archiveDirectory, cli.tempDirectory, !cli.noMerge, oitc)
+	cvt := &converter.Converter{Destination: cli.destDirectory, ArchivePath: cli.archiveDirectory, TempPath: cli.tempDirectory, Merge: !cli.noMerge, UUIDToPerfdata: perfdata, DeleteRRD: cli.deleteRRD}
 	converter.NewWorker(workerCtx, &wg, workdata.RrdSets, cli.parallel, cvt, &barIncrementor{bar: bar})
 	wg.Wait()
 	pb.Wait()
